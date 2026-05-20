@@ -118,19 +118,19 @@ onMounted(() => {
 
       <!-- Main content -->
       <main class="flex-1 overflow-y-auto">
-        <div class="px-4 sm:px-6 py-4 sm:py-6 animate-fade-in">
+        <div class="px-5 sm:px-7 py-5 sm:py-6 animate-fade-in">
 
           <!-- Breadcrumb -->
-          <nav class="mb-4 flex items-center space-x-2 text-sm text-tx-muted">
-            <a href="/" class="hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-200">
+          <nav class="mb-5 flex items-center space-x-2 text-xs text-tx-subtle">
+            <a href="/" class="hover:text-tx-primary transition-colors duration-200">
               <i class="fas fa-home"></i>
             </a>
-            <i class="fas fa-chevron-right text-xs text-tx-subtle"></i>
-            <span class="font-medium text-tx-primary">{{ $page.component.replace(/\//g, ' / ') }}</span>
+            <i class="fas fa-chevron-right text-[9px] opacity-50"></i>
+            <span class="font-medium text-tx-muted">{{ $page.component.replace(/\//g, ' / ') }}</span>
           </nav>
 
           <!-- Page content -->
-          <div class="space-y-6">
+          <div class="space-y-5">
             <slot />
           </div>
         </div>
@@ -146,13 +146,14 @@ onMounted(() => {
     <!-- Back to top button -->
     <button
       @click="scrollToTop"
-      class="fixed bottom-8 right-8 w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 text-white
+      class="fixed bottom-7 right-7 w-10 h-10 text-white
              rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300
              flex items-center justify-center z-40
              opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto"
+      style="background: linear-gradient(135deg, #d97706, #b45309);"
       aria-label="Back to top"
     >
-      <i class="fas fa-arrow-up"></i>
+      <i class="fas fa-arrow-up text-xs"></i>
     </button>
   </div>
 </template>

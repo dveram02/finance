@@ -21,8 +21,8 @@ const error = computed(() => {
             icon: 'fas fa-lock',
             color: 'red',
             gradient: 'from-red-500 to-rose-600',
-            iconBg: 'bg-red-50',
-            iconColor: 'text-red-500',
+            iconBg: 'bg-red-50 dark:bg-red-900/30',
+            iconColor: 'text-red-500 dark:text-red-400',
             codeColor: 'text-red-100',
         },
         404: {
@@ -31,8 +31,8 @@ const error = computed(() => {
             icon: 'fas fa-search',
             color: 'blue',
             gradient: 'from-blue-500 to-indigo-600',
-            iconBg: 'bg-blue-50',
-            iconColor: 'text-blue-500',
+            iconBg: 'bg-blue-50 dark:bg-blue-900/30',
+            iconColor: 'text-blue-500 dark:text-blue-400',
             codeColor: 'text-blue-100',
         },
         419: {
@@ -41,8 +41,8 @@ const error = computed(() => {
             icon: 'fas fa-clock',
             color: 'amber',
             gradient: 'from-amber-400 to-orange-500',
-            iconBg: 'bg-amber-50',
-            iconColor: 'text-amber-500',
+            iconBg: 'bg-amber-50 dark:bg-amber-900/30',
+            iconColor: 'text-amber-500 dark:text-amber-400',
             codeColor: 'text-amber-100',
         },
         429: {
@@ -51,8 +51,8 @@ const error = computed(() => {
             icon: 'fas fa-exclamation-triangle',
             color: 'amber',
             gradient: 'from-amber-400 to-orange-500',
-            iconBg: 'bg-amber-50',
-            iconColor: 'text-amber-500',
+            iconBg: 'bg-amber-50 dark:bg-amber-900/30',
+            iconColor: 'text-amber-500 dark:text-amber-400',
             codeColor: 'text-amber-100',
         },
         500: {
@@ -61,8 +61,8 @@ const error = computed(() => {
             icon: 'fas fa-server',
             color: 'red',
             gradient: 'from-red-500 to-rose-600',
-            iconBg: 'bg-red-50',
-            iconColor: 'text-red-500',
+            iconBg: 'bg-red-50 dark:bg-red-900/30',
+            iconColor: 'text-red-500 dark:text-red-400',
             codeColor: 'text-red-100',
         },
         503: {
@@ -71,8 +71,8 @@ const error = computed(() => {
             icon: 'fas fa-tools',
             color: 'amber',
             gradient: 'from-amber-400 to-orange-500',
-            iconBg: 'bg-amber-50',
-            iconColor: 'text-amber-500',
+            iconBg: 'bg-amber-50 dark:bg-amber-900/30',
+            iconColor: 'text-amber-500 dark:text-amber-400',
             codeColor: 'text-amber-100',
         },
     }
@@ -97,7 +97,7 @@ function goBack() {
 <template>
     <Head :title="`${status} — ${error.title}`" />
 
-    <div class="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30 flex flex-col items-center justify-center px-4 font-sans antialiased">
+    <div class="min-h-screen bg-surface-2 flex flex-col items-center justify-center px-4 antialiased">
 
         <!-- Brand header -->
         <div class="mb-10 text-center">
@@ -105,14 +105,14 @@ function goBack() {
                 <div class="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center shadow-md">
                     <i class="fas fa-warehouse text-white text-sm"></i>
                 </div>
-                <span class="text-xl font-bold text-gray-800">{{ page.props.appName }}</span>
+                <span class="text-xl font-bold text-tx-primary">{{ page.props.appName }}</span>
             </div>
-            <p class="text-xs text-gray-400 tracking-widest uppercase">Inventory Management System</p>
+            <p class="text-xs text-tx-subtle tracking-widest uppercase">Inventory Management System</p>
         </div>
 
         <!-- Error card -->
         <div class="w-full max-w-lg">
-            <div class="bg-surface rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+            <div class="bg-surface rounded-2xl shadow-xl border border-line overflow-hidden">
 
                 <!-- Accent strip -->
                 <div :class="`h-1.5 w-full bg-gradient-to-r ${error.gradient}`"></div>
@@ -160,7 +160,7 @@ function goBack() {
                 </div>
             </div>
 
-            <p class="text-center text-xs text-gray-400 mt-6">
+            <p class="text-center text-xs text-tx-subtle mt-6">
                 If this problem persists, please contact your system administrator.
             </p>
         </div>

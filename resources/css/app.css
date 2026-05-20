@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 @import "@fortawesome/fontawesome-free/css/all.css";
 
 @tailwind base;
@@ -7,32 +8,32 @@
 @layer base {
     :root {
         --color-surface: 255 255 255;
-        --color-surface-2: 249 250 251;
-        --color-surface-3: 243 244 246;
-        --color-surface-4: 229 231 235;
+        --color-surface-2: 247 248 252;
+        --color-surface-3: 238 241 249;
+        --color-surface-4: 220 226 242;
 
-        --color-tx-primary: 17 24 39;
-        --color-tx-body: 55 65 81;
-        --color-tx-muted: 75 85 99;
-        --color-tx-subtle: 107 114 128;
+        --color-tx-primary: 11 22 42;
+        --color-tx-body: 44 62 90;
+        --color-tx-muted: 72 88 115;
+        --color-tx-subtle: 107 120 143;
 
-        --color-line: 229 231 235;
-        --color-line-input: 209 213 219;
+        --color-line: 218 224 238;
+        --color-line-input: 196 206 224;
     }
 
     .dark {
-        --color-surface: 15 23 42;
-        --color-surface-2: 23 34 57;
-        --color-surface-3: 37 52 83;
-        --color-surface-4: 55 72 106;
+        --color-surface: 9 16 31;
+        --color-surface-2: 13 22 42;
+        --color-surface-3: 20 34 64;
+        --color-surface-4: 30 48 88;
 
-        --color-tx-primary: 248 250 252;
-        --color-tx-body: 226 232 240;
-        --color-tx-muted: 203 213 225;
-        --color-tx-subtle: 148 163 184;
+        --color-tx-primary: 241 245 249;
+        --color-tx-body: 203 213 225;
+        --color-tx-muted: 148 163 184;
+        --color-tx-subtle: 100 116 139;
 
-        --color-line: 51 65 92;
-        --color-line-input: 71 85 105;
+        --color-line: 30 48 88;
+        --color-line-input: 42 64 108;
     }
 
     html {
@@ -46,6 +47,7 @@
     body {
         background-color: rgb(var(--color-surface-2));
         color: rgb(var(--color-tx-body));
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     }
 
     input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
@@ -92,6 +94,10 @@
     }
 }
 
+.font-display {
+    font-family: 'Playfair Display', Georgia, serif;
+}
+
 main::-webkit-scrollbar {
     width: 8px;
 }
@@ -110,9 +116,9 @@ main::-webkit-scrollbar-thumb:hover {
 }
 
 .dark main::-webkit-scrollbar-thumb {
-    background: rgb(71 85 105);
+    background: rgb(42 64 108);
 }
 
 .dark main::-webkit-scrollbar-thumb:hover {
-    background: rgb(100 116 139);
+    background: rgb(71 85 105);
 }

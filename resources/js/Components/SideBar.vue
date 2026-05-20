@@ -11,7 +11,6 @@ const props = defineProps({
 
 const emit = defineEmits(['activate', 'signout', 'close-mobile'])
 
-// isDark drives the logo swap: logo.png (light) / logo_white.png (dark)
 const { isDark } = useDarkMode()
 
 const page = usePage()
@@ -122,44 +121,52 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
 </script>
 
 <style scoped>
-/* Sidebar scrollbar — light mode */
-.scrollbar-thin::-webkit-scrollbar       { width: 6px; }
-.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(209 213 219); border-radius: 3px; }
-.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgb(156 163 175); }
+.sidebar-nav::-webkit-scrollbar       { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.25); border-radius: 2px; }
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
 
-/* Dark-mode sidebar scrollbar */
-:global(.dark) .scrollbar-thin::-webkit-scrollbar-thumb       { background: rgb(75 85 99); }
-:global(.dark) .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgb(107 114 128); }
+.signout-btn {
+  color: rgb(var(--color-tx-muted));
+  border-color: transparent;
+  transition: all 0.2s ease;
+}
+.signout-btn:hover {
+  background: rgba(220, 38, 38, 0.07);
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.2);
+}
+:global(.dark) .signout-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: #f87171;
+  border-color: rgba(220, 38, 38, 0.18);
+}
 </style>
 
 <template>
-  <!-- bg-surface = white (light) / gray-900 (dark)  |  border-line adapts accordingly -->
   <aside
     :class="[
       'fixed inset-y-0 left-0 z-50 flex flex-col transition-all duration-300 transform',
       'md:translate-x-0',
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
       'w-72',
-      'bg-surface',
-      'border-r border-line shadow-lg',
+      'bg-surface border-r border-line shadow-md',
     ]"
   >
     <!-- Logo / header -->
-    <div class="relative p-6 border-b border-line">
+    <div class="relative px-5 py-5 border-b border-line">
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3">
-          <div class="w-20 h-20 rounded-xl flex items-center justify-center">
-            <!-- logo_white.png in dark mode, logo.png in light mode -->
+          <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-surface-3">
             <img
               :src="isDark ? '/images/logo_white.png' : '/images/logo.png'"
               alt="SWRHA Logo"
-              class="w-20 h-20 object-contain"
+              class="w-10 h-10 object-contain"
             />
           </div>
-          <div class="flex flex-col">
-            <h2 class="font-bold text-tx-primary text-lg tracking-tight">{{ page.props.appName }}</h2>
-            <p class="text-xs text-tx-muted font-medium">{{ appTagline }}</p>
+          <div class="flex flex-col min-w-0">
+            <h2 class="font-bold text-tx-primary text-base tracking-tight leading-tight truncate">{{ page.props.appName }}</h2>
+            <p class="text-xs text-tx-muted font-medium truncate">{{ appTagline }}</p>
           </div>
         </div>
 
@@ -169,22 +176,22 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
           class="md:hidden p-2 rounded-lg text-tx-muted hover:bg-surface-3 hover:text-tx-primary transition-all duration-200"
           aria-label="Close menu"
         >
-          <i class="fas fa-times text-xl"></i>
+          <i class="fas fa-times text-base"></i>
         </button>
       </div>
-      <!-- Decorative gradient bar -->
-      <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
+      <!-- Amber accent bar -->
+      <div class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-amber-500/60 via-amber-400/30 to-transparent"></div>
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 overflow-y-auto py-4 px-3 scrollbar-thin">
+    <nav class="flex-1 overflow-y-auto py-4 px-3 sidebar-nav">
       <template v-for="section in visibleSections" :key="section.title">
-        <div class="mb-6" v-if="sectionVisible(section)">
-          <h3 class="px-3 mb-3 text-xs font-semibold text-tx-subtle uppercase tracking-wider">
+        <div class="mb-5" v-if="sectionVisible(section)">
+          <h3 class="px-3 mb-2 text-[10px] font-semibold text-tx-subtle uppercase tracking-widest">
             {{ section.title }}
           </h3>
 
-          <ul class="space-y-1">
+          <ul class="space-y-0.5">
             <li v-for="item in visibleItems(section.items)" :key="item.name">
 
               <!-- Group with children -->
@@ -192,23 +199,24 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                 <button
                   v-if="(!item.can || canAny(item.can)) && (!item.role || item.role.some(isRole))"
                   @click="toggleDropdown(item)"
-                  class="group w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
+                  class="group w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 relative"
                   :class="
                     isChildActive(item) || item.open
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md'
+                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
                       : 'text-tx-body hover:bg-surface-3 hover:text-tx-primary'
                   "
                 >
-                  <div class="flex items-center space-x-3">
-                    <i :class="`${item.icon} w-5 text-center transition-transform duration-200`"
-                       :style="isChildActive(item) || item.open ? 'transform: scale(1.1)' : ''"></i>
+                  <div v-if="isChildActive(item) || item.open" class="absolute left-0 inset-y-1.5 w-0.5 bg-amber-500 rounded-r-sm"></div>
+
+                  <div class="flex items-center space-x-3 pl-1">
+                    <i :class="`${item.icon} w-4 text-center text-sm`"></i>
                     <span>{{ item.name }}</span>
                   </div>
                   <div class="flex items-center space-x-2">
                     <span v-if="item.badge" class="px-2 py-0.5 text-xs font-bold rounded-full bg-red-500 text-white">
                       {{ item.badge }}
                     </span>
-                    <i class="fas fa-chevron-down text-xs transition-transform duration-300"
+                    <i class="fas fa-chevron-down text-xs transition-transform duration-300 opacity-60"
                        :class="{ 'rotate-180': item.open || isChildActive(item) }" />
                   </div>
                 </button>
@@ -221,15 +229,14 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                   leave-from-class="opacity-100 translate-y-0"
                   leave-to-class="opacity-0 -translate-y-2"
                 >
-                  <!-- border-line adapts to dark mode via CSS variable -->
-                  <ul v-if="item.open || isChildActive(item)" class="ml-6 mt-1 space-y-1 border-l-2 border-line pl-3">
+                  <ul v-if="item.open || isChildActive(item)" class="ml-5 mt-1 space-y-0.5 pl-3 border-l-2 border-line">
                     <li v-for="c in visibleChildren(item.children)" :key="c.name">
                       <Link
                         :href="route(c.routeName, c.routeParams)"
                         class="group block px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 relative"
                         :class="
                           childActive(c)
-                            ? 'text-blue-600 bg-blue-50 font-semibold dark:text-blue-400 dark:bg-blue-900/20'
+                            ? 'bg-amber-50 text-amber-700 font-semibold dark:bg-amber-500/10 dark:text-amber-400'
                             : 'text-tx-muted hover:text-tx-primary hover:bg-surface-2'
                         "
                         @click="
@@ -238,8 +245,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                         "
                       >
                         <span class="relative z-10">{{ c.name }}</span>
-                        <!-- Active left-border accent (gradient) -->
-                        <div v-if="childActive(c)" class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-gradient-to-b from-blue-500 to-purple-500 rounded-r-full"></div>
+                        <div v-if="childActive(c)" class="absolute left-0 inset-y-1.5 w-0.5 bg-amber-500 rounded-r-full"></div>
                       </Link>
                     </li>
                   </ul>
@@ -253,7 +259,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                   class="group flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 relative"
                   :class="
                     itemActive(item)
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md'
+                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
                       : 'text-tx-body hover:bg-surface-3 hover:text-tx-primary'
                   "
                   @click="
@@ -261,9 +267,10 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                     $emit('close-mobile');
                   "
                 >
-                  <div class="flex items-center space-x-3">
-                    <i :class="`${item.icon} w-5 text-center transition-transform duration-200`"
-                       :style="itemActive(item) ? 'transform: scale(1.1)' : ''"></i>
+                  <div v-if="itemActive(item)" class="absolute left-0 inset-y-1.5 w-0.5 bg-amber-500 rounded-r-sm"></div>
+
+                  <div class="flex items-center space-x-3 pl-1">
+                    <i :class="`${item.icon} w-4 text-center text-sm`"></i>
                     <span>{{ item.name }}</span>
                   </div>
                   <span v-if="item.badge" class="px-2 py-0.5 text-xs font-bold rounded-full bg-red-500 text-white">
@@ -280,13 +287,12 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
     <!-- Footer: user info + sign out -->
     <div class="p-4 border-t border-line">
       <!-- User info card -->
-      <div class="flex items-center space-x-3 mb-3 p-2 rounded-lg bg-surface-2 hover:bg-surface-3 transition-colors duration-200">
-        <div class="relative">
-          <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full text-white flex items-center justify-center font-bold text-sm shadow-lg">
+      <div class="flex items-center space-x-3 mb-3 p-2.5 rounded-lg bg-surface-2 hover:bg-surface-3 transition-colors duration-200">
+        <div class="relative flex-shrink-0">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs text-white shadow-md bg-gradient-to-br from-amber-500 to-amber-700">
             {{ initials }}
           </div>
-          <!-- Online dot — border-surface so it blends with the card background -->
-          <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-surface"></div>
+          <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-surface"></div>
         </div>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold text-tx-primary truncate">{{ props.auth.user.name }}</p>
@@ -299,11 +305,9 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
         :href="route('logout')"
         method="post"
         as="button"
-        class="group flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200
-               text-tx-body hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400
-               border border-transparent hover:border-red-200 dark:hover:border-red-800"
+        class="signout-btn group flex items-center w-full px-3 py-2.5 text-sm font-medium rounded-lg border"
       >
-        <i class="fas fa-sign-out-alt w-5 transition-transform duration-200 group-hover:translate-x-1"></i>
+        <i class="fas fa-sign-out-alt w-4 text-center text-sm transition-transform duration-200 group-hover:translate-x-0.5"></i>
         <span class="ml-3">Sign Out</span>
       </Link>
     </div>
