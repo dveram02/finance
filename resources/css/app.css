@@ -1,0 +1,118 @@
+@import "@fortawesome/fontawesome-free/css/all.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --color-surface: 255 255 255;
+        --color-surface-2: 249 250 251;
+        --color-surface-3: 243 244 246;
+        --color-surface-4: 229 231 235;
+
+        --color-tx-primary: 17 24 39;
+        --color-tx-body: 55 65 81;
+        --color-tx-muted: 75 85 99;
+        --color-tx-subtle: 107 114 128;
+
+        --color-line: 229 231 235;
+        --color-line-input: 209 213 219;
+    }
+
+    .dark {
+        --color-surface: 15 23 42;
+        --color-surface-2: 23 34 57;
+        --color-surface-3: 37 52 83;
+        --color-surface-4: 55 72 106;
+
+        --color-tx-primary: 248 250 252;
+        --color-tx-body: 226 232 240;
+        --color-tx-muted: 203 213 225;
+        --color-tx-subtle: 148 163 184;
+
+        --color-line: 51 65 92;
+        --color-line-input: 71 85 105;
+    }
+
+    html {
+        color-scheme: light;
+    }
+
+    html.dark {
+        color-scheme: dark;
+    }
+
+    body {
+        background-color: rgb(var(--color-surface-2));
+        color: rgb(var(--color-tx-body));
+    }
+
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+    select,
+    textarea {
+        background-color: rgb(var(--color-surface-2));
+        color: rgb(var(--color-tx-primary));
+        border-color: rgb(var(--color-line-input));
+    }
+
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color'])::placeholder,
+    textarea::placeholder {
+        color: rgb(var(--color-tx-subtle));
+    }
+
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):disabled,
+    input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color'])[readonly],
+    select:disabled,
+    select[readonly],
+    textarea:disabled,
+    textarea[readonly] {
+        background-color: rgb(var(--color-surface-3));
+        color: rgb(var(--color-tx-muted));
+    }
+
+    select option,
+    select optgroup {
+        background-color: rgb(var(--color-surface));
+        color: rgb(var(--color-tx-primary));
+    }
+
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus,
+    textarea:-webkit-autofill,
+    textarea:-webkit-autofill:hover,
+    textarea:-webkit-autofill:focus,
+    select:-webkit-autofill,
+    select:-webkit-autofill:hover,
+    select:-webkit-autofill:focus {
+        -webkit-text-fill-color: rgb(var(--color-tx-primary));
+        -webkit-box-shadow: 0 0 0 1000px rgb(var(--color-surface-2)) inset;
+        transition: background-color 9999s ease-in-out 0s;
+    }
+}
+
+main::-webkit-scrollbar {
+    width: 8px;
+}
+
+main::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+main::-webkit-scrollbar-thumb {
+    background: rgb(203 213 225);
+    border-radius: 4px;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+    background: rgb(148 163 184);
+}
+
+.dark main::-webkit-scrollbar-thumb {
+    background: rgb(71 85 105);
+}
+
+.dark main::-webkit-scrollbar-thumb:hover {
+    background: rgb(100 116 139);
+}
