@@ -141,6 +141,20 @@ return [
             'options'                  => defined('PDO::SQLSRV_ATTR_ENCODING') ? [PDO::SQLSRV_ATTR_ENCODING => 65001] : [],
         ],
 
+        'gpswrha' => [
+            'driver'                   => 'sqlsrv',
+            'host'                     => env('GP_SQLSRV_HOST', 'localhost'),
+            'port'                     => env('GP_SQLSRV_PORT', '1433'),
+            'database'                 => env('GP_SQLSRV_DATABASE', 'laravel'),
+            'username'                 => env('GP_SQLSRV_USERNAME', ''),
+            'password'                 => env('GP_SQLSRV_PASSWORD', ''),
+            'charset'                  => 'UTF-8',
+            'prefix'                   => '',
+            'encrypt'                  => env('SQLSRV_ENCRYPT', 'yes'),
+            'trust_server_certificate' => env('SQLSRV_TRUST_SERVER_CERT', 'true'),
+            'options'                  => defined('PDO::SQLSRV_ATTR_ENCODING') ? [PDO::SQLSRV_ATTR_ENCODING => 65001] : [],
+        ],
+
     ],
 
     /*

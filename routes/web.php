@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\BudgetAllocationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -17,8 +18,9 @@ Route::middleware('guest')->group(function () {
 
 // Authenticated routes
 Route::middleware(['auth', 'active.user'])->group(function () {
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    Route::get('/profile',   [ProfileController::class, 'view'])->name('profile.view');
+    Route::get('/dashboard',           [DashboardController::class,        'index'])->name('dashboard');
+    Route::get('/profile',             [ProfileController::class,           'view'])->name('profile.view');
+    Route::get('/budget-allocations',  [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
 });
 
 // Logout

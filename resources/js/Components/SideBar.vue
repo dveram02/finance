@@ -104,6 +104,12 @@ const sections = reactive([
     ]
   },
   {
+    title: 'Finance',
+    items: [
+      { name: 'Budget Allocations', icon: 'fas fa-coins', routeName: 'budget-allocations.index', routeParams: {}, activeWhen: { any: ['budget-allocations.*'] } },
+    ]
+  },
+  {
     title: 'Profile',
     items: [
       { name: 'View Profile', icon: 'fa-solid fa-user', routeName: 'profile.view', routeParams: {}, activeWhen: { any: ['profile.*'] } },
