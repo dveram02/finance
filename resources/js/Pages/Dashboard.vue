@@ -266,24 +266,6 @@ const doughnutOptions = computed(() => ({
     <!-- KPI cards -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
-      <!-- YTD Expenditure -->
-      <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
-        <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #f59e0b;"></div>
-        <div class="pl-1">
-          <div class="flex items-start justify-between mb-3">
-            <div>
-              <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">YTD Expenditure</p>
-              <p class="text-[10px] text-tx-subtle mt-0.5">{{ currentYear }} fiscal year</p>
-            </div>
-            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
-              <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
-            </div>
-          </div>
-          <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
-          <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
-        </div>
-      </div>
-
       <!-- Total Budget -->
       <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
         <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #14b8a6;"></div>
@@ -328,28 +310,30 @@ const doughnutOptions = computed(() => ({
         </div>
       </div>
 
+      <!-- YTD Expenditure -->
+      <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+        <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #f59e0b;"></div>
+        <div class="pl-1">
+          <div class="flex items-start justify-between mb-3">
+            <div>
+              <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">YTD Expenditure</p>
+              <p class="text-[10px] text-tx-subtle mt-0.5">{{ currentYear }} fiscal year</p>
+            </div>
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
+              <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
+            </div>
+          </div>
+          <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
+          <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
+        </div>
+      </div>
+
     </div>
 
     <!-- Chart grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
 
-      <!-- Card 1: Monthly Expenditure -->
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
-        <div class="mb-4 flex items-start justify-between">
-          <div>
-            <h3 class="text-sm font-bold text-tx-primary">Monthly Expenditure</h3>
-            <p class="text-xs text-tx-muted mt-0.5">Spend by month (TTD)</p>
-          </div>
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(245,158,11,0.1);">
-            <i class="fas fa-chart-bar text-xs" style="color: #d97706;"></i>
-          </div>
-        </div>
-        <div class="flex-1 min-h-[220px]">
-          <Bar :data="barData" :options="barOptions" />
-        </div>
-      </div>
-
-      <!-- Card 2: Budget vs Actual -->
+      <!-- Card 1: Budget vs Actual -->
       <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
         <div class="mb-4 flex items-start justify-between">
           <div>
@@ -365,8 +349,8 @@ const doughnutOptions = computed(() => ({
         </div>
       </div>
 
-      <!-- Card 3: Expenditure by Category -->
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col lg:col-span-2 xl:col-span-1">
+      <!-- Card 2: Expenditure by Category -->
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
         <div class="mb-4 flex items-start justify-between">
           <div>
             <h3 class="text-sm font-bold text-tx-primary">Expenditure by Category</h3>
@@ -378,6 +362,22 @@ const doughnutOptions = computed(() => ({
         </div>
         <div class="flex-1 min-h-[240px] flex items-center justify-center">
           <Doughnut :data="doughnutData" :options="doughnutOptions" />
+        </div>
+      </div>
+
+      <!-- Card 3: Monthly Expenditure -->
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col lg:col-span-2 xl:col-span-1">
+        <div class="mb-4 flex items-start justify-between">
+          <div>
+            <h3 class="text-sm font-bold text-tx-primary">Monthly Expenditure</h3>
+            <p class="text-xs text-tx-muted mt-0.5">Spend by month (TTD)</p>
+          </div>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(245,158,11,0.1);">
+            <i class="fas fa-chart-bar text-xs" style="color: #d97706;"></i>
+          </div>
+        </div>
+        <div class="flex-1 min-h-[220px]">
+          <Bar :data="barData" :options="barOptions" />
         </div>
       </div>
 
