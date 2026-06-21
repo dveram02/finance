@@ -3,15 +3,18 @@ import { ref, computed } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 
 const props = defineProps({
-    allocations:      Object,
-    clusters:         Array,
-    institutions:     Array,
-    responsibilities: Array,
-    departments:      Array,
-    accounts:         Array,
-    years:            Array,
-    stats:            Object,
-    filters:          Object,
+    allocations:       Object,
+    clusters:          Array,
+    institutions:      Array,
+    responsibilities:  Array,
+    departments:       Array,
+    accounts:          Array,
+    years:             Array,
+    stats:             Object,
+    filters:           Object,
+    activeFiscalYear:  [Number, String],
+    currentFiscalYear: [Number, String],
+    fyNav:             Object,
 })
 
 // ── Filter state ──────────────────────────────────────────────────────────────
@@ -21,9 +24,26 @@ const filters = ref({
     responsibility: props.filters.responsibility ?? '',
     department:     props.filters.department     ?? '',
     account:        props.filters.account        ?? '',
-    year_from:      props.filters.year_from      ?? '',
-    year_to:        props.filters.year_to        ?? '',
+    fy:             props.activeFiscalYear != null ? String(props.activeFiscalYear) : '',
 })
+
+// ── Fiscal year ───────────────────────────────────────────────────────────────
+const isCurrentFiscalYear = computed(() =>
+    String(props.activeFiscalYear) === String(props.currentFiscalYear)
+)
+
+// Fiscal year N runs Oct (N-1) → Sep N.
+const fiscalYearSpan = computed(() => {
+    const fy = Number(props.activeFiscalYear)
+    if (!fy) return ''
+    return `Oct ${fy - 1} – Sep ${fy}`
+})
+
+const goToFy = (fy) => {
+    if (fy === null || fy === undefined) return
+    filters.value.fy = String(fy)
+    applyFilters()
+}
 
 // ── Institution cascade ───────────────────────────────────────────────────────
 const filteredInstitutions = computed(() => {
@@ -31,8 +51,10 @@ const filteredInstitutions = computed(() => {
     return props.institutions.filter(i => i.ClusterName === filters.value.cluster)
 })
 
+// Fiscal year is always set, so it is excluded from the "clear" affordance.
 const hasActiveFilters = computed(() =>
-    Object.values(filters.value).some(v => v !== '' && v !== null && v !== undefined)
+    ['cluster', 'institution', 'responsibility', 'department', 'account']
+        .some(k => filters.value[k] !== '' && filters.value[k] !== null && filters.value[k] !== undefined)
 )
 
 // ── Navigation helpers ────────────────────────────────────────────────────────
@@ -55,7 +77,7 @@ const onClusterChange = () => {
 const clearFilters = () => {
     filters.value = {
         cluster: '', institution: '', responsibility: '',
-        department: '', account: '', year_from: '', year_to: '',
+        department: '', account: '', fy: filters.value.fy,
     }
     applyFilters()
 }
@@ -103,7 +125,13 @@ const formatNumber = (value) =>
             <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                     <h1 class="text-2xl font-bold text-tx-primary">Budget Allocations</h1>
-                    <p class="text-sm text-tx-subtle mt-1">View your approved budget allocations by financial year.</p>
+                    <p class="text-sm text-tx-subtle mt-1">
+                        <template v-if="activeFiscalYear">
+                            Showing fiscal year <span class="font-semibold text-tx-body">{{ activeFiscalYear }}</span>
+                            <span class="text-tx-muted">({{ fiscalYearSpan }})</span>
+                        </template>
+                        <template v-else>View your approved budget allocations by financial year.</template>
+                    </p>
                 </div>
             </div>
 
@@ -198,29 +226,39 @@ const formatNumber = (value) =>
                         </select>
                     </div>
 
-                    <!-- Year From -->
+                    <!-- Fiscal Year navigator -->
                     <div>
-                        <label class="block text-xs font-medium text-tx-subtle mb-1">Year From</label>
-                        <select v-model="filters.year_from" @change="applyFilters"
-                            class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                            <option value="">Any Year</option>
-                            <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
-                        </select>
+                        <label class="flex items-center gap-2 text-xs font-medium text-tx-subtle mb-1">
+                            Fiscal Year
+                            <span v-if="isCurrentFiscalYear"
+                                class="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                                Current
+                            </span>
+                        </label>
+                        <div class="flex items-stretch gap-1">
+                            <button @click="goToFy(fyNav?.prev)" :disabled="!fyNav?.prev"
+                                title="Previous fiscal year"
+                                class="flex-shrink-0 inline-flex items-center justify-center w-9 rounded-lg border border-line-input bg-surface text-tx-subtle hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-tx-subtle disabled:hover:border-line-input transition">
+                                <i class="fas fa-chevron-left text-xs"></i>
+                            </button>
+                            <select v-model="filters.fy" @change="applyFilters"
+                                class="flex-1 min-w-0 rounded-lg border border-line-input bg-surface px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
+                                <option v-for="year in years" :key="year" :value="String(year)">FY {{ year }}</option>
+                            </select>
+                            <button @click="goToFy(fyNav?.next)" :disabled="!fyNav?.next"
+                                title="Next fiscal year"
+                                class="flex-shrink-0 inline-flex items-center justify-center w-9 rounded-lg border border-line-input bg-surface text-tx-subtle hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-tx-subtle disabled:hover:border-line-input transition">
+                                <i class="fas fa-chevron-right text-xs"></i>
+                            </button>
+                        </div>
                     </div>
 
-                    <!-- Year To + Clear button -->
-                    <div class="flex gap-2 items-end">
-                        <div class="flex-1">
-                            <label class="block text-xs font-medium text-tx-subtle mb-1">Year To</label>
-                            <select v-model="filters.year_to" @change="applyFilters"
-                                class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                                <option value="">Any Year</option>
-                                <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
-                            </select>
-                        </div>
-                        <button v-if="hasActiveFilters" @click="clearFilters" title="Clear all filters"
-                            class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg border border-line-input bg-surface text-tx-subtle hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition mb-0">
+                    <!-- Clear filters -->
+                    <div class="flex items-end">
+                        <button v-if="hasActiveFilters" @click="clearFilters"
+                            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line-input bg-surface text-sm text-tx-subtle hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition">
                             <i class="fas fa-times text-sm"></i>
+                            Clear filters
                         </button>
                     </div>
 
@@ -304,14 +342,14 @@ const formatNumber = (value) =>
                 </div>
 
                 <!-- Pagination -->
-                <div v-if="allocations.last_page > 1" class="bg-surface-2 px-4 py-3 border-t border-line">
+                <div v-if="allocations.total > 0" class="bg-surface-2 px-4 py-3 border-t border-line">
                     <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
                         <p class="text-sm text-tx-body">
                             Showing <span class="font-medium">{{ allocations.from }}</span> to
                             <span class="font-medium">{{ allocations.to }}</span> of
                             <span class="font-medium">{{ allocations.total }}</span> results
                         </p>
-                        <nav class="flex items-center gap-1">
+                        <nav v-if="allocations.last_page > 1" class="flex items-center gap-1">
                             <template v-for="link in allocations.links" :key="link.label">
                                 <Link v-if="link.url" :href="link.url" preserve-scroll
                                     :class="['px-3 py-1.5 text-sm rounded-md transition',

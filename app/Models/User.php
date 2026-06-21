@@ -26,6 +26,7 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
+            'employee_id'           => 'integer',
             'is_active'             => 'boolean',
             'sql_server_verified_at' => 'datetime',
         ];

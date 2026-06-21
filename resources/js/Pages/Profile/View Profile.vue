@@ -119,7 +119,7 @@ const getInitials = (name) => {
                 </div>
                 <div class="flex-1 min-w-0">
                   <dt class="text-[10px] font-semibold text-tx-subtle uppercase tracking-widest">Employee ID</dt>
-                  <dd class="mt-1 text-sm font-semibold text-tx-primary truncate">{{ user.employee_id || '—' }}</dd>
+                  <dd class="mt-1 text-sm font-semibold text-tx-primary truncate">{{ user.employee_id ?? '—' }}</dd>
                 </div>
               </div>
 

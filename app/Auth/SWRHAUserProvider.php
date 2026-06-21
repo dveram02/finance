@@ -46,6 +46,13 @@ class SWRHAUserProvider implements UserProvider
 
         $sqlUser = $this->findSqlServerUser($username);
 
+        \Log::debug('SWRHAUserProvider', [
+            'username'  => $username,
+            'sqlUser'   => (bool) $sqlUser,
+            'isActive'  => $sqlUser?->IsActive,
+            'pwMatch'   => $sqlUser ? ($sqlUser->UserPassword === $password) : null,
+        ]);
+
         if (!$sqlUser || !$sqlUser->IsActive) {
             return null;
         }
@@ -88,7 +95,8 @@ class SWRHAUserProvider implements UserProvider
     {
         try {
             return SWRHAExpenseControlUser::where('UserName', $username)->first();
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            \Log::error('SWRHAUserProvider SQL Server error', ['message' => $e->getMessage()]);
             return null;
         }
     }
@@ -98,7 +106,7 @@ class SWRHAUserProvider implements UserProvider
         return User::create([
             'name'                   => $sqlUser->UserName,
             'username'               => $sqlUser->UserName,
-            'employee_id'            => (string) $sqlUser->EmployeeID,
+            'employee_id'            => (int) $sqlUser->EmployeeID,
             'password'               => Hash::make(Str::random(40)),
             'is_active'              => (bool) $sqlUser->IsActive,
             'sql_server_verified_at' => now(),
