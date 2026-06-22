@@ -3,14 +3,16 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BudgetAllocationController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\MonthlyExpenditureController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::get('/', fn () => redirect()->route('dashboard'));
 
 // Guest routes
 Route::middleware('guest')->group(function () {
-    Route::get('/login',  [AuthenticatedSessionController::class, 'create'])->name('login');
+    Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])
         ->middleware('throttle:login')
         ->name('login.store');
@@ -18,9 +20,10 @@ Route::middleware('guest')->group(function () {
 
 // Authenticated routes
 Route::middleware(['auth', 'active.user'])->group(function () {
-    Route::get('/dashboard',           [DashboardController::class,        'index'])->name('dashboard');
-    Route::get('/profile',             [ProfileController::class,           'view'])->name('profile.view');
-    Route::get('/budget-allocations',  [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
+    Route::get('/dashboard', [DashboardController::class,        'index'])->name('dashboard');
+    Route::get('/profile', [ProfileController::class,           'view'])->name('profile.view');
+    Route::get('/budget-allocations', [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
+    Route::get('/monthly-expenditure', [MonthlyExpenditureController::class, 'index'])->name('monthly-expenditure.index');
 });
 
 // Logout
@@ -32,7 +35,7 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
 if (app()->environment('local')) {
     Route::prefix('error-preview')->name('error-preview.')->group(function () {
         Route::get('/{status}', function (int $status) {
-            return \Inertia\Inertia::render('Error', ['status' => $status]);
+            return Inertia::render('Error', ['status' => $status]);
         })->where('status', '403|404|419|429|500|503')->name('inertia');
     });
 }

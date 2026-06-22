@@ -107,6 +107,7 @@ const sections = reactive([
     title: 'Finance',
     items: [
       { name: 'Budget Allocations', icon: 'fas fa-coins', routeName: 'budget-allocations.index', routeParams: {}, activeWhen: { any: ['budget-allocations.*'] } },
+      { name: 'Monthly Expenditure', icon: 'fas fa-chart-line', routeName: 'monthly-expenditure.index', routeParams: {}, activeWhen: { any: ['monthly-expenditure.*'] } },
     ]
   },
   {
