@@ -89,6 +89,10 @@ onMounted(() => {
             <i class="fas fa-server text-green-600 dark:text-green-400 text-xs"></i>
             <span class="font-medium text-green-700 dark:text-green-400">Online</span>
           </div>
+          <span class="hidden sm:flex items-center gap-1.5 text-tx-subtle">
+            <i class="fas fa-handshake text-teal-500"></i>
+            <span>In Collaboration with <span class="font-medium text-teal-600 dark:text-teal-400">Finance and ICT</span></span>
+          </span>
           <a
             href="https://tt.linkedin.com/in/bharathramkissoon"
             target="_blank"
@@ -101,9 +105,12 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- Mobile Developer Attribution -->
-       <!-- Mobile Developer Attribution -->
-      <div class="sm:hidden mt-2 text-center text-xs">
+      <!-- Mobile Attribution -->
+      <div class="sm:hidden mt-2 flex flex-col items-center gap-1.5 text-center text-xs">
+        <span class="inline-flex items-center gap-1.5 text-tx-subtle">
+          <i class="fas fa-handshake text-teal-500"></i>
+          <span>In Collaboration with <span class="font-medium text-teal-600 dark:text-teal-400">Finance and ICT</span></span>
+        </span>
         <a
           href="https://tt.linkedin.com/in/bharathramkissoon"
           target="_blank"

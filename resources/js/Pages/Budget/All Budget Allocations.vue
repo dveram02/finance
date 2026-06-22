@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 
 const props = defineProps({
@@ -17,7 +17,7 @@ const props = defineProps({
     fyNav:             Object,
 })
 
-// ── Filter state ──────────────────────────────────────────────────────────────
+// ── Filter state (categorical only — FY is steered by the hero navigator) ───────
 const filters = ref({
     cluster:        props.filters.cluster        ?? '',
     institution:    props.filters.institution    ?? '',
@@ -27,7 +27,9 @@ const filters = ref({
     fy:             props.activeFiscalYear != null ? String(props.activeFiscalYear) : '',
 })
 
-// ── Fiscal year ───────────────────────────────────────────────────────────────
+// ── Fiscal year ─────────────────────────────────────────────────────────────────
+const activeYearStr = computed(() => String(props.activeFiscalYear ?? ''))
+
 const isCurrentFiscalYear = computed(() =>
     String(props.activeFiscalYear) === String(props.currentFiscalYear)
 )
@@ -41,23 +43,24 @@ const fiscalYearSpan = computed(() => {
 
 const goToFy = (fy) => {
     if (fy === null || fy === undefined) return
+    if (String(fy) === activeYearStr.value) return
     filters.value.fy = String(fy)
     applyFilters()
 }
 
-// ── Institution cascade ───────────────────────────────────────────────────────
+// ── Institution cascade ─────────────────────────────────────────────────────────
 const filteredInstitutions = computed(() => {
     if (!filters.value.cluster) return props.institutions
     return props.institutions.filter(i => i.ClusterName === filters.value.cluster)
 })
 
-// Fiscal year is always set, so it is excluded from the "clear" affordance.
-const hasActiveFilters = computed(() =>
+// FY is always set, so it is excluded from the "refine" affordances.
+const activeFilterCount = computed(() =>
     ['cluster', 'institution', 'responsibility', 'department', 'account']
-        .some(k => filters.value[k] !== '' && filters.value[k] !== null && filters.value[k] !== undefined)
+        .filter(k => filters.value[k] !== '' && filters.value[k] != null).length
 )
 
-// ── Navigation helpers ────────────────────────────────────────────────────────
+// ── Navigation helpers ──────────────────────────────────────────────────────────
 const applyFilters = () => {
     const params = Object.fromEntries(
         Object.entries(filters.value).filter(([, v]) => v !== '' && v !== null)
@@ -82,7 +85,60 @@ const clearFilters = () => {
     applyFilters()
 }
 
-// ── Formatting ────────────────────────────────────────────────────────────────
+// ── Year rail: auto-scroll active year into view ────────────────────────────────
+const yearRail = ref(null)
+
+const scrollActiveIntoView = () => {
+    nextTick(() => {
+        const el = yearRail.value?.querySelector('[data-active="true"]')
+        el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+    })
+}
+
+// ── Keyboard navigation (← / → between fiscal years) ────────────────────────────
+const handleKeydown = (e) => {
+    const tag = document.activeElement?.tagName
+    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return
+
+    if (e.key === 'ArrowLeft' && props.fyNav?.prev != null) {
+        e.preventDefault()
+        goToFy(props.fyNav.prev)
+    } else if (e.key === 'ArrowRight' && props.fyNav?.next != null) {
+        e.preventDefault()
+        goToFy(props.fyNav.next)
+    }
+}
+
+// ── Loading state (shown while a filter / FY / page reload is in flight) ─────────
+// Driven by Inertia's global visit events so it covers the filter selects, the
+// fiscal-year navigator, and the pagination links alike. The `start` guard keeps
+// the spinner from flashing when the user navigates away to another page.
+const loading = ref(false)
+let stopOnStart = null
+let stopOnFinish = null
+
+onMounted(() => {
+    window.addEventListener('keydown', handleKeydown)
+    scrollActiveIntoView()
+
+    stopOnStart = router.on('start', (event) => {
+        const url = event.detail?.visit?.url
+        if (!url || String(url.pathname ?? url).includes('budget-allocations')) {
+            loading.value = true
+        }
+    })
+    stopOnFinish = router.on('finish', () => {
+        loading.value = false
+    })
+})
+
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleKeydown)
+    stopOnStart?.()
+    stopOnFinish?.()
+})
+
+// ── Formatting ──────────────────────────────────────────────────────────────────
 const formatCurrency = (value) =>
     new Intl.NumberFormat('en-TT', { style: 'currency', currency: 'TTD' }).format(value ?? 0)
 
@@ -93,281 +149,466 @@ const formatNumber = (value) =>
 <template>
     <Head title="Budget Allocations" />
 
-    <main class="min-h-screen bg-surface-2 py-6 px-4 sm:px-6 lg:px-8">
-        <div class="mx-auto max-w-7xl space-y-6">
+    <div class="space-y-6">
 
-            <!-- Flash messages -->
-            <div v-if="$page.props.flash?.success"
-                class="p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3 dark:bg-green-900/20 dark:border-green-800">
-                <svg class="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                </svg>
-                <p class="text-sm text-green-800 dark:text-green-200">{{ $page.props.flash.success }}</p>
+        <!-- ════════════════════════════ Flash messages ═══════════════════════════ -->
+        <div v-if="$page.props.flash?.success"
+            class="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3 dark:bg-green-900/20 dark:border-green-800">
+            <i class="fas fa-circle-check text-green-500 mt-0.5"></i>
+            <p class="text-sm text-green-800 dark:text-green-200">{{ $page.props.flash.success }}</p>
+        </div>
+        <div v-if="$page.props.flash?.error"
+            class="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 dark:bg-red-900/20 dark:border-red-800">
+            <i class="fas fa-circle-exclamation text-red-500 mt-0.5"></i>
+            <p class="text-sm text-red-800 dark:text-red-200">{{ $page.props.flash.error }}</p>
+        </div>
+        <div v-if="$page.props.flash?.warning"
+            class="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 dark:bg-amber-900/20 dark:border-amber-800">
+            <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5"></i>
+            <p class="text-sm text-amber-800 dark:text-amber-200">{{ $page.props.flash.warning }}</p>
+        </div>
+
+        <!-- ════════════════════════════ Page header ══════════════════════════════ -->
+        <div class="text-center">
+            <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">Budget Allocations</h1>
+            <p class="text-sm text-tx-subtle mt-1">
+                A fiscal-year ledger of your approved budget allocations.
+            </p>
+        </div>
+
+        <!-- ═══════════════════ Fiscal Year navigator (the hero) ═══════════════════ -->
+        <section class="relative overflow-hidden rounded-2xl border border-line shadow-sm">
+            <!-- Navy gradient base (matches the dashboard welcome panel) -->
+            <div class="absolute inset-0"
+                style="background: linear-gradient(135deg, #0b1625 0%, #14213d 45%, #0b1625 100%);"></div>
+            <!-- Radial dot texture -->
+            <div class="absolute inset-0 opacity-[0.06]"
+                style="background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.5) 1px, transparent 0); background-size: 22px 22px;"></div>
+            <!-- Gold filament along the top edge -->
+            <div class="absolute top-0 inset-x-0 h-px"
+                style="background: linear-gradient(90deg, transparent, #d97706 25%, #fbbf24 50%, #d97706 75%, transparent);"></div>
+            <!-- Soft gold glow behind the numeral -->
+            <div class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[150%] h-28 w-28 rounded-full blur-3xl"
+                style="background: radial-gradient(circle, rgba(251,191,36,0.16), transparent 70%);"></div>
+
+            <div class="relative px-6 sm:px-10 py-3.5">
+
+                <!-- Eyebrow row -->
+                <div class="flex items-center justify-between gap-4">
+                    <span class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/90">
+                        <i class="fas fa-calendar-day text-[10px]"></i>
+                        Fiscal Year
+                    </span>
+                    <span v-if="isCurrentFiscalYear"
+                        class="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 ring-1 ring-amber-300/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-200">
+                        <span class="relative flex h-1.5 w-1.5">
+                            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-75"></span>
+                            <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-300"></span>
+                        </span>
+                        Current
+                    </span>
+                </div>
+
+                <!-- Stepper: prev · numeral · next -->
+                <div class="mt-2 flex items-center justify-center gap-5 sm:gap-8">
+                    <button
+                        @click="goToFy(fyNav?.prev)" :disabled="!fyNav?.prev"
+                        title="Previous fiscal year (←)" aria-label="Previous fiscal year"
+                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-white/15 bg-white/5 text-blue-100/80 backdrop-blur-sm transition hover:border-amber-300/50 hover:text-amber-200 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:border-white/15 disabled:hover:text-blue-100/80 disabled:hover:bg-white/5">
+                        <i class="fas fa-chevron-left transition-transform group-hover:-translate-x-0.5"></i>
+                    </button>
+
+                    <div class="text-center min-w-[7rem] sm:min-w-[9rem]">
+                        <div class="relative inline-block leading-none">
+                            <transition name="fy" mode="out-in">
+                                <span :key="activeYearStr"
+                                    class="fy-numeral font-display block text-5xl font-bold text-white tabular-nums">
+                                    {{ activeFiscalYear || '—' }}
+                                </span>
+                            </transition>
+                        </div>
+                        <p class="mt-1 text-xs font-medium text-blue-100/60 tracking-wide">
+                            {{ fiscalYearSpan }}
+                        </p>
+                    </div>
+
+                    <button
+                        @click="goToFy(fyNav?.next)" :disabled="!fyNav?.next"
+                        title="Next fiscal year (→)" aria-label="Next fiscal year"
+                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-white/15 bg-white/5 text-blue-100/80 backdrop-blur-sm transition hover:border-amber-300/50 hover:text-amber-200 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:border-white/15 disabled:hover:text-blue-100/80 disabled:hover:bg-white/5">
+                        <i class="fas fa-chevron-right transition-transform group-hover:translate-x-0.5"></i>
+                    </button>
+                </div>
+
+                <!-- Year rail -->
+                <div v-if="years.length" class="mt-3">
+                    <div ref="yearRail"
+                        role="tablist" aria-label="Select fiscal year"
+                        class="year-rail flex items-center justify-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                        <button v-for="year in years" :key="year"
+                            role="tab"
+                            :data-active="String(year) === activeYearStr"
+                            :aria-selected="String(year) === activeYearStr"
+                            @click="goToFy(year)"
+                            :class="[
+                                'flex-shrink-0 rounded-full px-3.5 py-1 text-sm font-semibold tabular-nums transition-all duration-200',
+                                String(year) === activeYearStr
+                                    ? 'bg-gradient-to-b from-amber-300 to-amber-500 text-[#1a1205] shadow-lg shadow-amber-500/20'
+                                    : 'bg-white/5 text-blue-100/70 ring-1 ring-white/10 hover:bg-white/10 hover:text-white',
+                                String(year) === String(currentFiscalYear) && String(year) !== activeYearStr
+                                    ? 'ring-1 ring-dashed ring-amber-300/50' : '',
+                            ]">
+                            {{ year }}
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ════════════════════════════ KPI cards ════════════════════════════════ -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+            <!-- Total Records -->
+            <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+                <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #6366f1;"></div>
+                <div class="pl-1">
+                    <div class="flex items-start justify-between mb-3">
+                        <div>
+                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Records</p>
+                            <p class="text-[10px] text-tx-subtle mt-0.5">Matching the current filters</p>
+                        </div>
+                        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(99,102,241,0.1);">
+                            <i class="fas fa-layer-group text-sm" style="color: #4f46e5;"></i>
+                        </div>
+                    </div>
+                    <p class="font-display text-3xl font-bold text-tx-primary leading-none tabular-nums">{{ formatNumber(stats.total) }}</p>
+                </div>
             </div>
 
-            <div v-if="$page.props.flash?.error"
-                class="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 dark:bg-red-900/20 dark:border-red-800">
-                <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-9v4a1 1 0 102 0V9a1 1 0 10-2 0zm0-4a1 1 0 112 0 1 1 0 01-2 0z" clip-rule="evenodd"/>
-                </svg>
-                <p class="text-sm text-red-800 dark:text-red-200">{{ $page.props.flash.error }}</p>
-            </div>
-
-            <div v-if="$page.props.flash?.warning"
-                class="p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3 dark:bg-amber-900/20 dark:border-amber-800">
-                <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                </svg>
-                <p class="text-sm text-amber-800 dark:text-amber-200">{{ $page.props.flash.warning }}</p>
-            </div>
-
-            <!-- Page header -->
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-tx-primary">Budget Allocations</h1>
-                    <p class="text-sm text-tx-subtle mt-1">
-                        <template v-if="activeFiscalYear">
-                            Showing fiscal year <span class="font-semibold text-tx-body">{{ activeFiscalYear }}</span>
-                            <span class="text-tx-muted">({{ fiscalYearSpan }})</span>
-                        </template>
-                        <template v-else>View your approved budget allocations by financial year.</template>
+            <!-- Largest Allocation -->
+            <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+                <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #0ea5e9;"></div>
+                <div class="pl-1">
+                    <div class="flex items-start justify-between mb-3">
+                        <div>
+                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Largest Allocation</p>
+                            <p class="text-[10px] text-tx-subtle mt-0.5 truncate max-w-[10rem]" :title="stats.largest?.label">
+                                {{ stats.largest?.label || 'Single biggest line' }}
+                            </p>
+                        </div>
+                        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(14,165,233,0.1);">
+                            <i class="fas fa-arrow-up-wide-short text-sm" style="color: #0ea5e9;"></i>
+                        </div>
+                    </div>
+                    <p class="text-[11px] font-semibold text-tx-muted mb-0.5">TTD</p>
+                    <p class="font-display text-3xl font-bold text-tx-primary leading-none tabular-nums">
+                        {{ formatNumber(Number(stats.largest?.amount ?? 0).toFixed(2)) }}
                     </p>
                 </div>
             </div>
 
-            <!-- KPI cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-                <div class="bg-surface rounded-lg shadow-sm border border-line p-5 relative overflow-hidden">
-                    <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-lg bg-slate-500"></div>
-                    <div class="pl-1">
-                        <div class="flex items-start justify-between mb-2">
-                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Records</p>
-                            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 dark:bg-slate-800">
-                                <i class="fas fa-list text-xs text-slate-500"></i>
-                            </div>
-                        </div>
-                        <p class="text-2xl font-bold text-tx-primary">{{ formatNumber(stats.total) }}</p>
-                        <p class="text-xs text-tx-subtle mt-1">matching your current filters</p>
-                    </div>
-                </div>
-
-                <div class="bg-surface rounded-lg shadow-sm border border-line p-5 relative overflow-hidden">
-                    <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-lg bg-teal-500"></div>
-                    <div class="pl-1">
-                        <div class="flex items-start justify-between mb-2">
+            <!-- Total Allocation -->
+            <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+                <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #d97706;"></div>
+                <div class="pl-1">
+                    <div class="flex items-start justify-between mb-3">
+                        <div>
                             <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Allocation</p>
-                            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-teal-50 dark:bg-teal-900/30">
-                                <i class="fas fa-coins text-xs text-teal-600 dark:text-teal-400"></i>
-                            </div>
+                            <p class="text-[10px] text-tx-subtle mt-0.5">Across all filtered results</p>
                         </div>
-                        <p class="text-2xl font-bold text-tx-primary">{{ formatCurrency(stats.totalAllocation) }}</p>
-                        <p class="text-xs text-tx-subtle mt-1">across all filtered results</p>
-                    </div>
-                </div>
-
-            </div>
-
-            <!-- Filter bar -->
-            <div class="bg-surface rounded-lg shadow-sm border border-line p-4">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-
-                    <!-- Cluster -->
-                    <div>
-                        <label class="block text-xs font-medium text-tx-subtle mb-1">Cluster</label>
-                        <select v-model="filters.cluster" @change="onClusterChange"
-                            class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                            <option value="">All Clusters</option>
-                            <option v-for="cluster in clusters" :key="cluster" :value="cluster">{{ cluster }}</option>
-                        </select>
-                    </div>
-
-                    <!-- Institution (cascades from cluster) -->
-                    <div>
-                        <label class="block text-xs font-medium text-tx-subtle mb-1">Institution</label>
-                        <select v-model="filters.institution" @change="applyFilters"
-                            class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                            <option value="">All Institutions</option>
-                            <option v-for="inst in filteredInstitutions" :key="inst.InstitutionName" :value="inst.InstitutionName">
-                                {{ inst.InstitutionName }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <!-- Responsibility -->
-                    <div>
-                        <label class="block text-xs font-medium text-tx-subtle mb-1">Responsibility</label>
-                        <select v-model="filters.responsibility" @change="applyFilters"
-                            class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                            <option value="">All Responsibilities</option>
-                            <option v-for="r in responsibilities" :key="r" :value="r">{{ r }}</option>
-                        </select>
-                    </div>
-
-                    <!-- Department -->
-                    <div>
-                        <label class="block text-xs font-medium text-tx-subtle mb-1">Department</label>
-                        <select v-model="filters.department" @change="applyFilters"
-                            class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                            <option value="">All Departments</option>
-                            <option v-for="dept in departments" :key="dept" :value="dept">{{ dept }}</option>
-                        </select>
-                    </div>
-
-                    <!-- Account (spans 2 cols on large screens) -->
-                    <div class="lg:col-span-2">
-                        <label class="block text-xs font-medium text-tx-subtle mb-1">Account</label>
-                        <select v-model="filters.account" @change="applyFilters"
-                            class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                            <option value="">All Accounts</option>
-                            <option v-for="acc in accounts" :key="acc.AccountNumber" :value="acc.AccountNumber">
-                                {{ acc.AccountDescription }} ({{ acc.AccountNumber }})
-                            </option>
-                        </select>
-                    </div>
-
-                    <!-- Fiscal Year navigator -->
-                    <div>
-                        <label class="flex items-center gap-2 text-xs font-medium text-tx-subtle mb-1">
-                            Fiscal Year
-                            <span v-if="isCurrentFiscalYear"
-                                class="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                                Current
-                            </span>
-                        </label>
-                        <div class="flex items-stretch gap-1">
-                            <button @click="goToFy(fyNav?.prev)" :disabled="!fyNav?.prev"
-                                title="Previous fiscal year"
-                                class="flex-shrink-0 inline-flex items-center justify-center w-9 rounded-lg border border-line-input bg-surface text-tx-subtle hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-tx-subtle disabled:hover:border-line-input transition">
-                                <i class="fas fa-chevron-left text-xs"></i>
-                            </button>
-                            <select v-model="filters.fy" @change="applyFilters"
-                                class="flex-1 min-w-0 rounded-lg border border-line-input bg-surface px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition">
-                                <option v-for="year in years" :key="year" :value="String(year)">FY {{ year }}</option>
-                            </select>
-                            <button @click="goToFy(fyNav?.next)" :disabled="!fyNav?.next"
-                                title="Next fiscal year"
-                                class="flex-shrink-0 inline-flex items-center justify-center w-9 rounded-lg border border-line-input bg-surface text-tx-subtle hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-tx-subtle disabled:hover:border-line-input transition">
-                                <i class="fas fa-chevron-right text-xs"></i>
-                            </button>
+                        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(217,119,6,0.1);">
+                            <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
                         </div>
                     </div>
-
-                    <!-- Clear filters -->
-                    <div class="flex items-end">
-                        <button v-if="hasActiveFilters" @click="clearFilters"
-                            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line-input bg-surface text-sm text-tx-subtle hover:text-red-500 hover:border-red-300 hover:bg-red-50 transition">
-                            <i class="fas fa-times text-sm"></i>
-                            Clear filters
-                        </button>
-                    </div>
-
+                    <p class="text-[11px] font-semibold text-tx-muted mb-0.5">TTD</p>
+                    <p class="font-display text-3xl font-bold text-tx-primary leading-none tabular-nums">
+                        {{ formatNumber(Number(stats.totalAllocation).toFixed(2)) }}
+                    </p>
                 </div>
-            </div>
-
-            <!-- Results table -->
-            <div class="bg-surface rounded-lg shadow-sm border border-line overflow-hidden">
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-line">
-                        <thead class="bg-surface-2">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Year
-                                </th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Cluster
-                                </th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Institution
-                                </th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Responsibility
-                                </th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Department
-                                </th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Account
-                                </th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Account No.
-                                </th>
-                                <th class="px-4 py-3 text-right text-xs font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                    Total Allocation
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-line">
-
-                            <!-- Empty state -->
-                            <tr v-if="allocations.data.length === 0">
-                                <td colspan="8" class="px-4 py-12 text-center">
-                                    <i class="fas fa-inbox text-4xl text-tx-muted mb-3 block"></i>
-                                    <p class="text-sm font-medium text-tx-subtle">No allocations found.</p>
-                                    <p class="text-xs text-tx-muted mt-1">Try adjusting your filters.</p>
-                                </td>
-                            </tr>
-
-                            <!-- Data rows -->
-                            <tr v-for="(row, index) in allocations.data" :key="index"
-                                class="hover:bg-surface-2 transition">
-                                <td class="px-4 py-3 text-sm text-tx-primary whitespace-nowrap font-medium">
-                                    {{ row.FinancialYear ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">
-                                    {{ row.ClusterName ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">
-                                    {{ row.InstitutionName ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">
-                                    {{ row.ResponsibilityName ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">
-                                    {{ row.DepartmentName ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-body">
-                                    {{ row.AccountDescription ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-subtle font-mono whitespace-nowrap">
-                                    {{ row.AccountNumber ?? '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-sm text-tx-primary text-right whitespace-nowrap font-medium tabular-nums">
-                                    {{ formatCurrency(row.TotalAllocation) }}
-                                </td>
-                            </tr>
-
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Pagination -->
-                <div v-if="allocations.total > 0" class="bg-surface-2 px-4 py-3 border-t border-line">
-                    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-                        <p class="text-sm text-tx-body">
-                            Showing <span class="font-medium">{{ allocations.from }}</span> to
-                            <span class="font-medium">{{ allocations.to }}</span> of
-                            <span class="font-medium">{{ allocations.total }}</span> results
-                        </p>
-                        <nav v-if="allocations.last_page > 1" class="flex items-center gap-1">
-                            <template v-for="link in allocations.links" :key="link.label">
-                                <Link v-if="link.url" :href="link.url" preserve-scroll
-                                    :class="['px-3 py-1.5 text-sm rounded-md transition',
-                                        link.active ? 'bg-indigo-600 text-white' : 'text-tx-body hover:bg-surface-3']">
-                                    <span v-html="link.label"></span>
-                                </Link>
-                                <span v-else
-                                    :class="['px-3 py-1.5 text-sm rounded-md opacity-40',
-                                        link.active ? 'bg-indigo-600 text-white' : 'text-tx-body']">
-                                    <span v-html="link.label"></span>
-                                </span>
-                            </template>
-                        </nav>
-                    </div>
-                </div>
-
             </div>
 
         </div>
-    </main>
+
+        <!-- ════════════════════════════ Filters bar ══════════════════════════════ -->
+        <div class="bg-surface rounded-xl shadow-sm border border-line overflow-hidden">
+            <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-line bg-surface-2">
+                <div class="flex items-center gap-2.5">
+                    <i class="fas fa-sliders text-tx-subtle text-sm"></i>
+                    <h2 class="text-sm font-semibold text-tx-primary">Filters</h2>
+                    <span v-if="activeFilterCount"
+                        class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-indigo-600 text-white text-[11px] font-bold">
+                        {{ activeFilterCount }}
+                    </span>
+                </div>
+                <button v-if="activeFilterCount" @click="clearFilters"
+                    class="inline-flex items-center gap-1.5 text-xs font-medium text-tx-subtle hover:text-red-500 transition">
+                    <i class="fas fa-xmark"></i>
+                    Clear all
+                </button>
+            </div>
+
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+
+                <div class="lg:col-span-2">
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Cluster</label>
+                    <select v-model="filters.cluster" @change="onClusterChange"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Clusters</option>
+                        <option v-for="cluster in clusters" :key="cluster" :value="cluster">{{ cluster }}</option>
+                    </select>
+                </div>
+
+                <div class="lg:col-span-2">
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Institution</label>
+                    <select v-model="filters.institution" @change="applyFilters"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Institutions</option>
+                        <option v-for="inst in filteredInstitutions" :key="inst.InstitutionName" :value="inst.InstitutionName">
+                            {{ inst.InstitutionName }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="lg:col-span-2">
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Responsibility</label>
+                    <select v-model="filters.responsibility" @change="applyFilters"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Responsibilities</option>
+                        <option v-for="r in responsibilities" :key="r" :value="r">{{ r }}</option>
+                    </select>
+                </div>
+
+                <div class="sm:col-span-2 lg:col-span-2">
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Department</label>
+                    <select v-model="filters.department" @change="applyFilters"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Departments</option>
+                        <option v-for="dept in departments" :key="dept" :value="dept">{{ dept }}</option>
+                    </select>
+                </div>
+
+                <div class="sm:col-span-2 lg:col-span-2">
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Account</label>
+                    <select v-model="filters.account" @change="applyFilters"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Accounts</option>
+                        <option v-for="acc in accounts" :key="acc.AccountNumber" :value="acc.AccountNumber">
+                            {{ acc.AccountDescription }} ({{ acc.AccountNumber }})
+                        </option>
+                    </select>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ════════════════════════════ Results table ════════════════════════════ -->
+        <div class="bg-surface rounded-xl shadow-sm border border-line overflow-hidden relative">
+
+            <!-- Loading overlay — financial coin spinner while a visit is in flight -->
+            <transition name="overlay">
+                <div v-if="loading"
+                    class="absolute inset-0 z-20 grid place-items-center bg-surface/70 backdrop-blur-[2px]">
+                    <div class="flex flex-col items-center gap-4">
+                        <div class="coin" aria-hidden="true">
+                            <div class="coin__face coin__front">$</div>
+                            <div class="coin__face coin__back">$</div>
+                        </div>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-tx-subtle">
+                            Loading allocations<span class="loading-dots"></span>
+                        </p>
+                    </div>
+                </div>
+            </transition>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-line">
+                    <thead class="bg-surface-2">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Year</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Cluster</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Institution</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Responsibility</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Department</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Account</th>
+                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Account No.</th>
+                            <th class="px-4 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Total Allocation</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-line">
+
+                        <!-- Empty state -->
+                        <tr v-if="allocations.data.length === 0">
+                            <td colspan="8" class="px-4 py-16 text-center">
+                                <div class="inline-grid place-items-center h-14 w-14 rounded-full bg-surface-3 mb-3">
+                                    <i class="fas fa-folder-open text-xl text-tx-muted"></i>
+                                </div>
+                                <p class="text-sm font-medium text-tx-body">No allocations found</p>
+                                <p class="text-xs text-tx-muted mt-1">
+                                    Nothing in <span class="font-semibold">FY {{ activeFiscalYear }}</span>
+                                    <template v-if="activeFilterCount"> matching your filters</template>.
+                                </p>
+                            </td>
+                        </tr>
+
+                        <!-- Data rows -->
+                        <tr v-for="(row, index) in allocations.data" :key="index"
+                            class="group hover:bg-amber-50/40 dark:hover:bg-amber-900/10 transition-colors">
+                            <td class="px-4 py-3 text-sm text-tx-primary whitespace-nowrap font-semibold tabular-nums">{{ row.FinancialYear ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.ClusterName ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.InstitutionName ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.ResponsibilityName ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.DepartmentName ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-body max-w-xs truncate" :title="row.AccountDescription">{{ row.AccountDescription ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-subtle font-mono whitespace-nowrap">{{ row.AccountNumber ?? '—' }}</td>
+                            <td class="px-4 py-3 text-sm text-tx-primary text-right whitespace-nowrap font-semibold tabular-nums">
+                                <span class="border-b border-transparent group-hover:border-amber-400/60 transition-colors">{{ formatCurrency(row.TotalAllocation) }}</span>
+                            </td>
+                        </tr>
+
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div v-if="allocations.total > 0" class="bg-surface-2 px-4 py-3 border-t border-line">
+                <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <p class="text-sm text-tx-body">
+                        Showing <span class="font-semibold text-tx-primary">{{ allocations.from }}</span> to
+                        <span class="font-semibold text-tx-primary">{{ allocations.to }}</span> of
+                        <span class="font-semibold text-tx-primary">{{ allocations.total }}</span> results
+                    </p>
+                    <nav v-if="allocations.last_page > 1" class="flex items-center gap-1">
+                        <template v-for="link in allocations.links" :key="link.label">
+                            <Link v-if="link.url" :href="link.url" preserve-scroll
+                                :class="['px-3 py-1.5 text-sm rounded-md transition tabular-nums',
+                                    link.active ? 'bg-gradient-to-b from-amber-400 to-amber-500 text-[#1a1205] font-semibold shadow-sm' : 'text-tx-body hover:bg-surface-3']">
+                                <span v-html="link.label"></span>
+                            </Link>
+                            <span v-else
+                                class="px-3 py-1.5 text-sm rounded-md opacity-40 text-tx-body">
+                                <span v-html="link.label"></span>
+                            </span>
+                        </template>
+                    </nav>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
 </template>
+
+<style scoped>
+/* Fiscal-year numeral transition — replays on every year change via :key */
+.fy-enter-active {
+    animation: fyIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fy-leave-active {
+    animation: fyOut 0.2s ease-in forwards;
+}
+@keyframes fyIn {
+    0%   { opacity: 0; transform: translateY(0.35em) scale(0.94); filter: blur(6px); }
+    100% { opacity: 1; transform: translateY(0)     scale(1);    filter: blur(0); }
+}
+@keyframes fyOut {
+    0%   { opacity: 1; transform: translateY(0)      scale(1); }
+    100% { opacity: 0; transform: translateY(-0.3em) scale(0.97); }
+}
+
+/* Slim year-rail scrollbar */
+.year-rail::-webkit-scrollbar {
+    height: 5px;
+}
+.year-rail::-webkit-scrollbar-track {
+    background: transparent;
+}
+.year-rail::-webkit-scrollbar-thumb {
+    background: rgba(251, 191, 36, 0.28);
+    border-radius: 9999px;
+}
+.year-rail::-webkit-scrollbar-thumb:hover {
+    background: rgba(251, 191, 36, 0.5);
+}
+
+/* ── Loading overlay fade ──────────────────────────────────────────────────── */
+.overlay-enter-active,
+.overlay-leave-active {
+    transition: opacity 0.2s ease;
+}
+.overlay-enter-from,
+.overlay-leave-to {
+    opacity: 0;
+}
+
+/* ── Financial coin spinner ────────────────────────────────────────────────── */
+/* A minted gold coin flipping on its vertical axis. Two faces with hidden
+   backfaces keep the "$" upright through the whole rotation; the coin bobs
+   gently so it reads as 3-D rather than a flat spin. */
+.coin {
+    position: relative;
+    width: 58px;
+    height: 58px;
+    transform-style: preserve-3d;
+    animation: coinFlip 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite,
+               coinBob 1.5s ease-in-out infinite;
+    filter: drop-shadow(0 10px 12px rgba(180, 83, 9, 0.28));
+}
+
+.coin__face {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 9999px;
+    font-family: 'Playfair Display', Georgia, serif;
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: #7c2d12;
+    backface-visibility: hidden;
+    background:
+        radial-gradient(circle at 34% 28%, #fffbeb 0%, #fde68a 26%, #f59e0b 62%, #d97706 84%, #b45309 100%);
+    box-shadow:
+        inset 0 2px 3px rgba(255, 255, 255, 0.65),
+        inset 0 -4px 7px rgba(120, 53, 15, 0.5),
+        inset 0 0 0 4px rgba(180, 83, 9, 0.28);   /* milled rim */
+}
+
+.coin__back {
+    transform: rotateY(180deg);
+}
+
+@keyframes coinFlip {
+    0%   { transform: rotateY(0deg); }
+    100% { transform: rotateY(360deg); }
+}
+
+@keyframes coinBob {
+    0%, 100% { translate: 0 0; }
+    50%      { translate: 0 -5px; }
+}
+
+/* Animated trailing dots on the label */
+.loading-dots::after {
+    content: '';
+    animation: loadingDots 1.4s steps(1, end) infinite;
+}
+
+@keyframes loadingDots {
+    0%   { content: ''; }
+    25%  { content: '.'; }
+    50%  { content: '..'; }
+    75%  { content: '...'; }
+    100% { content: ''; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .coin {
+        animation: coinFlip 2.4s linear infinite;
+    }
+    .loading-dots::after {
+        animation: none;
+        content: '…';
+    }
+}
+</style>
