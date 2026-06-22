@@ -34,6 +34,9 @@ const { isDark } = useDarkMode()
 
 const props = defineProps({
   userName: String,
+  fiscalYear: Number,
+  totalBudget: Number,
+  budgetAvailable: { type: Boolean, default: true },
   monthlyExpenditure: Object,
   budgetVsActual: Object,
   expenditureByCategory: Object,
@@ -48,7 +51,6 @@ const formatAmount = (value) =>
 
 // ── Today's date ──────────────────────────────────────────────────────────────
 const today = new Date().toLocaleDateString('en-TT', { year: 'numeric', month: 'long', day: 'numeric' })
-const currentYear = new Date().getFullYear()
 
 // ── KPI computations ──────────────────────────────────────────────────────────
 const totalExpenditure = computed(() => {
@@ -56,10 +58,10 @@ const totalExpenditure = computed(() => {
   return data.reduce((sum, v) => sum + (v ?? 0), 0)
 })
 
-const totalBudget = computed(() => {
-  const data = props.budgetVsActual?.datasets?.[0]?.data ?? []
-  return data.reduce((sum, v) => sum + (v ?? 0), 0)
-})
+// Live annual allocation for the active fiscal year. The budget line is flat at
+// this value, so it must come from the prop directly — summing the chart data
+// would report it once per month (6×).
+const totalBudget = computed(() => props.totalBudget ?? 0)
 
 const variance = computed(() => totalBudget.value - totalExpenditure.value)
 
@@ -129,7 +131,7 @@ const lineData = computed(() => ({
   labels: props.budgetVsActual?.labels ?? [],
   datasets: [
     {
-      label: 'Budget',
+      label: 'Annual Budget',
       data: props.budgetVsActual?.datasets?.[0]?.data ?? [],
       borderColor: 'rgba(100, 116, 139, 0.8)',
       backgroundColor: 'rgba(100, 116, 139, 0.06)',
@@ -279,8 +281,14 @@ const doughnutOptions = computed(() => ({
               <i class="fas fa-chart-pie text-sm" style="color: #0d9488;"></i>
             </div>
           </div>
-          <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
-          <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
+          <template v-if="budgetAvailable">
+            <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
+            <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
+          </template>
+          <template v-else>
+            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Budget unavailable</p>
+            <p class="text-[10px] text-tx-subtle mt-1">Financial data source could not be reached.</p>
+          </template>
         </div>
       </div>
 
@@ -292,21 +300,29 @@ const doughnutOptions = computed(() => ({
             <div>
               <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Budget Usage</p>
               <p class="text-[10px] text-tx-subtle mt-0.5">
-                {{ variance >= 0 ? 'TTD ' + formatAmount(variance) + ' remaining' : 'Over budget' }}
+                <template v-if="budgetAvailable">{{ variance >= 0 ? 'TTD ' + formatAmount(variance) + ' remaining' : 'Over budget' }}</template>
+                <template v-else>Awaiting budget data</template>
               </p>
             </div>
             <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: utilizationColor + '18' }">
               <i class="fas fa-gauge-high text-sm" :style="{ color: utilizationColor }"></i>
             </div>
           </div>
-          <p class="font-display text-2xl font-bold leading-none" :style="{ color: utilizationColor }">{{ budgetUtilization }}%</p>
-          <!-- Progress bar -->
-          <div class="mt-3 h-1.5 bg-surface-3 rounded-full overflow-hidden">
-            <div
-              class="h-full rounded-full transition-all duration-700"
-              :style="{ width: budgetUtilization + '%', background: utilizationColor }"
-            ></div>
-          </div>
+          <template v-if="budgetAvailable">
+            <p class="font-display text-2xl font-bold leading-none" :style="{ color: utilizationColor }">{{ budgetUtilization }}%</p>
+            <!-- Progress bar -->
+            <div class="mt-3 h-1.5 bg-surface-3 rounded-full overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-700"
+                :style="{ width: budgetUtilization + '%', background: utilizationColor }"
+              ></div>
+            </div>
+            <!-- Actuals are placeholder data until the chart source is live. -->
+            <p class="text-[10px] text-tx-subtle mt-2 italic">Provisional — actuals are sample data</p>
+          </template>
+          <template v-else>
+            <p class="font-display text-2xl font-bold leading-none text-tx-muted">&mdash;</p>
+          </template>
         </div>
       </div>
 
@@ -317,7 +333,7 @@ const doughnutOptions = computed(() => ({
           <div class="flex items-start justify-between mb-3">
             <div>
               <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">YTD Expenditure</p>
-              <p class="text-[10px] text-tx-subtle mt-0.5">{{ currentYear }} fiscal year</p>
+              <p class="text-[10px] text-tx-subtle mt-0.5">FY {{ fiscalYear }}</p>
             </div>
             <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
               <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
