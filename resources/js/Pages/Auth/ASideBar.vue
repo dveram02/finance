@@ -11,7 +11,7 @@
     <div class="flex items-center p-6 border-b border-line">
       <div class="flex items-center space-x-3">
         <div class="w-20 h-20 rounded-lg flex items-center justify-center">
-            <img src="../../../../public/images/logo.png" alt="SWRHA Logo"></img>
+            <img :src="isDark ? '/images/logo_white.png' : '/images/logo.png'" alt="SWRHA Logo"></img>
         </div>
         <div class="flex flex-col">
           <h2 class="font-semibold text-gray-800">{{ page.props.appName }}</h2>
@@ -101,8 +101,10 @@
 <script setup>
 import { reactive } from 'vue'
 import { Link, usePage } from '@inertiajs/vue3'
+import { useDarkMode } from '@/composables/useDarkMode'
 
 const page = usePage()
+const { isDark } = useDarkMode()
 
 const props = defineProps({
   active: String,

@@ -164,13 +164,11 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
     <div class="relative px-5 py-5 border-b border-line">
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3">
-          <div class="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-surface-3">
-            <img
-              :src="isDark ? '/images/logo_white.png' : '/images/logo.png'"
-              alt="SWRHA Logo"
-              class="w-10 h-10 object-contain"
-            />
-          </div>
+          <img
+            :src="isDark ? '/images/logo_white.png' : '/images/logo.png'"
+            alt="SWRHA Logo"
+            class="h-12 w-auto flex-shrink-0 object-contain"
+          />
           <div class="flex flex-col min-w-0">
             <h2 class="font-bold text-tx-primary text-base tracking-tight leading-tight truncate">{{ page.props.appName }}</h2>
             <p class="text-xs text-tx-muted font-medium truncate">{{ appTagline }}</p>
