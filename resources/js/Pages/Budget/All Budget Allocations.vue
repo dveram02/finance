@@ -177,12 +177,12 @@ const formatNumber = (value) =>
         </div>
 
         <!-- ═══════════════════ Fiscal Year navigator (the hero) ═══════════════════ -->
-        <section class="relative overflow-hidden rounded-2xl border border-line shadow-sm">
-            <!-- Navy gradient base (matches the dashboard welcome panel) -->
-            <div class="absolute inset-0"
-                style="background: linear-gradient(135deg, #0b1625 0%, #14213d 45%, #0b1625 100%);"></div>
+        <section class="relative overflow-hidden rounded-2xl border border-white/60 shadow-xl shadow-slate-950/8 dark:border-white/10">
+            <div class="absolute inset-0 bg-gradient-to-br from-cyan-50 via-white to-slate-100 dark:from-[#0b1625] dark:via-[#14213d] dark:to-[#0b1625]"></div>
             <!-- Radial dot texture -->
-            <div class="absolute inset-0 opacity-[0.06]"
+            <div class="absolute inset-0 opacity-[0.18] dark:hidden"
+                style="background-image: radial-gradient(circle at 1px 1px, rgba(8,47,73,0.45) 1px, transparent 0); background-size: 22px 22px;"></div>
+            <div class="absolute inset-0 hidden opacity-[0.06] dark:block"
                 style="background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.5) 1px, transparent 0); background-size: 22px 22px;"></div>
             <!-- Gold filament along the top edge -->
             <div class="absolute top-0 inset-x-0 h-px"
@@ -195,12 +195,12 @@ const formatNumber = (value) =>
 
                 <!-- Eyebrow row -->
                 <div class="flex items-center justify-between gap-4">
-                    <span class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-300/90">
+                    <span class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-800 dark:text-amber-300/90">
                         <i class="fas fa-calendar-day text-[10px]"></i>
                         Fiscal Year
                     </span>
                     <span v-if="isCurrentFiscalYear"
-                        class="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 ring-1 ring-amber-300/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-200">
+                        class="inline-flex items-center gap-1.5 rounded-full bg-amber-100 ring-1 ring-amber-300/70 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:bg-amber-400/15 dark:ring-amber-300/40 dark:text-amber-200">
                         <span class="relative flex h-1.5 w-1.5">
                             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-75"></span>
                             <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-300"></span>
@@ -214,7 +214,7 @@ const formatNumber = (value) =>
                     <button
                         @click="goToFy(fyNav?.prev)" :disabled="!fyNav?.prev"
                         title="Previous fiscal year (←)" aria-label="Previous fiscal year"
-                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-white/15 bg-white/5 text-blue-100/80 backdrop-blur-sm transition hover:border-amber-300/50 hover:text-amber-200 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:border-white/15 disabled:hover:text-blue-100/80 disabled:hover:bg-white/5">
+                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
                         <i class="fas fa-chevron-left transition-transform group-hover:-translate-x-0.5"></i>
                     </button>
 
@@ -222,12 +222,12 @@ const formatNumber = (value) =>
                         <div class="relative inline-block leading-none">
                             <transition name="fy" mode="out-in">
                                 <span :key="activeYearStr"
-                                    class="fy-numeral font-display block text-5xl font-bold text-white tabular-nums">
+                                    class="fy-numeral font-display block text-5xl font-bold text-slate-950 tabular-nums dark:text-white">
                                     {{ activeFiscalYear || '—' }}
                                 </span>
                             </transition>
                         </div>
-                        <p class="mt-1 text-xs font-medium text-blue-100/60 tracking-wide">
+                        <p class="mt-1 text-xs font-medium text-slate-600 tracking-wide dark:text-blue-100/60">
                             {{ fiscalYearSpan }}
                         </p>
                     </div>
@@ -235,7 +235,7 @@ const formatNumber = (value) =>
                     <button
                         @click="goToFy(fyNav?.next)" :disabled="!fyNav?.next"
                         title="Next fiscal year (→)" aria-label="Next fiscal year"
-                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-white/15 bg-white/5 text-blue-100/80 backdrop-blur-sm transition hover:border-amber-300/50 hover:text-amber-200 hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed disabled:hover:border-white/15 disabled:hover:text-blue-100/80 disabled:hover:bg-white/5">
+                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
                         <i class="fas fa-chevron-right transition-transform group-hover:translate-x-0.5"></i>
                     </button>
                 </div>
@@ -254,7 +254,7 @@ const formatNumber = (value) =>
                                 'flex-shrink-0 rounded-full px-3.5 py-1 text-sm font-semibold tabular-nums transition-all duration-200',
                                 String(year) === activeYearStr
                                     ? 'bg-gradient-to-b from-amber-300 to-amber-500 text-[#1a1205] shadow-lg shadow-amber-500/20'
-                                    : 'bg-white/5 text-blue-100/70 ring-1 ring-white/10 hover:bg-white/10 hover:text-white',
+                                    : 'bg-white/70 text-cyan-800 ring-1 ring-cyan-700/10 hover:bg-cyan-50 hover:text-cyan-950 dark:bg-white/5 dark:text-blue-100/70 dark:ring-white/10 dark:hover:bg-white/10 dark:hover:text-white',
                                 String(year) === String(currentFiscalYear) && String(year) !== activeYearStr
                                     ? 'ring-1 ring-dashed ring-amber-300/50' : '',
                             ]">

@@ -22,27 +22,24 @@ const getInitials = (name) => {
   <div class="max-w-4xl mx-auto space-y-6">
 
     <!-- Hero Card -->
-    <div class="rounded-xl overflow-hidden border border-line shadow-sm">
-      <div
-        class="relative px-7 py-10 overflow-hidden"
-        :style="isDark
-          ? 'background: linear-gradient(135deg, #0b1625 0%, #0e2040 50%, #0b1625 100%);'
-          : 'background: linear-gradient(135deg, #1d4ed8 0%, #4338ca 60%, #6d28d9 100%);'"
-      >
+    <div class="rounded-2xl overflow-hidden border border-white/60 bg-gradient-to-br from-cyan-50 via-white to-slate-100 shadow-xl shadow-slate-950/10 dark:border-white/10 dark:from-[#0b1625] dark:via-[#0e2040] dark:to-[#0b1625]">
+      <div class="relative px-7 py-10 overflow-hidden">
         <!-- Dot-grid pattern -->
-        <div class="absolute inset-0 opacity-5"
+        <div class="absolute inset-0 opacity-[0.18] dark:hidden"
+             style="background-image: radial-gradient(circle at 1px 1px, rgba(8,47,73,0.45) 1px, transparent 0); background-size: 24px 24px;"></div>
+        <div class="absolute inset-0 hidden opacity-5 dark:block"
              style="background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.4) 1px, transparent 0); background-size: 24px 24px;"></div>
         <!-- Gold accent top bar -->
         <div class="absolute top-0 left-0 right-0 h-0.5"
-             style="background: linear-gradient(90deg, #d97706, #f59e0b 40%, transparent 100%);"></div>
+             style="background: linear-gradient(90deg, #0891b2, #d97706 45%, transparent 100%);"></div>
         <!-- Decorative circle blur -->
-        <div class="absolute -right-16 -top-16 w-64 h-64 rounded-full opacity-10"
-             style="background: radial-gradient(circle, #f59e0b 0%, transparent 70%);"></div>
+        <div class="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-cyan-300/20 blur-3xl"></div>
+        <div class="absolute -left-12 bottom-0 w-40 h-40 rounded-full bg-amber-300/20 blur-2xl"></div>
 
         <div class="relative flex items-center gap-6">
           <!-- Avatar -->
           <div
-            class="w-20 h-20 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-xl border border-white/20"
+            class="w-20 h-20 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-xl border border-white/50 dark:border-white/20"
             style="background: linear-gradient(135deg, rgba(217,119,6,0.75) 0%, rgba(245,158,11,0.55) 100%);"
           >
             <span class="font-display text-3xl font-bold text-white tracking-tight">{{ getInitials(user.name) }}</span>
@@ -50,16 +47,16 @@ const getInitials = (name) => {
 
           <!-- Name + meta -->
           <div class="flex-1 min-w-0">
-            <p class="text-xs font-semibold text-white/50 uppercase tracking-widest mb-1">My Profile</p>
-            <h1 class="font-display text-2xl font-bold text-white leading-tight truncate">{{ user.name }}</h1>
+            <p class="text-xs font-semibold text-cyan-800 uppercase tracking-widest mb-1 dark:text-white/50">My Profile</p>
+            <h1 class="font-display text-2xl font-bold text-slate-950 leading-tight truncate dark:text-white">{{ user.name }}</h1>
             <div class="flex items-center gap-3 mt-2.5 flex-wrap">
-              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15">
+              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 dark:bg-white/10 dark:border-white/15">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span class="text-xs font-semibold text-white/80">Active</span>
+                <span class="text-xs font-semibold text-emerald-800 dark:text-white/80">Active</span>
               </div>
-              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15">
-                <i class="fas fa-building text-[10px] text-white/60"></i>
-                <span class="text-xs font-medium text-white/70">Finance Portal</span>
+              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-50 border border-cyan-200 dark:bg-white/10 dark:border-white/15">
+                <i class="fas fa-building text-[10px] text-cyan-700 dark:text-white/60"></i>
+                <span class="text-xs font-medium text-cyan-800 dark:text-white/70">Finance Portal</span>
               </div>
             </div>
           </div>
