@@ -6,8 +6,17 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Read-only model for SWRHAExpenseControl.dbo.vw_WebAppUsers.
- * Used exclusively by SWRHAUserProvider for credential validation.
+ * Used exclusively by SWRHAUserProvider for credential validation
+ * and EnsureUserIsActive for active-status reverification.
  * Never write to this model.
+ *
+ * Columns (PascalCase, mirrored from the view):
+ *   - EmployeeID   (string key — may be alphanumeric / zero-padded)
+ *   - EmployeeName (LEFT JOIN to ArrearsDatabase.0002AEmployees — may be NULL)
+ *   - UserName
+ *   - UserPassword
+ *   - PositionID
+ *   - IsActive
  */
 class SWRHAExpenseControlUser extends Model
 {

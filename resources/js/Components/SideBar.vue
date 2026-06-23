@@ -302,7 +302,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
         </div>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold text-tx-primary truncate">{{ props.auth.user.name }}</p>
-          <p class="text-xs text-tx-muted truncate">{{ props.auth.user.email }}</p>
+          <p class="text-xs text-tx-muted truncate">{{ props.auth.user.username }}</p>
         </div>
       </div>
 

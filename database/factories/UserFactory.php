@@ -2,12 +2,13 @@
 
 namespace Database\Factories;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\User>
+ * @extends Factory<User>
  */
 class UserFactory extends Factory
 {
@@ -19,57 +20,30 @@ class UserFactory extends Factory
     /**
      * Define the model's default state.
      *
+     * Mirrors the local `users` table, which is a cache of the SQL Server
+     * `vw_WebAppUsers` record. `sql_server_verified_at` defaults to now() so
+     * authenticated tests don't trip `active.user` reverification (a 5-min-stale
+     * timestamp would force a live SQL Server query the test environment lacks).
+     *
      * @return array<string, mixed>
      */
     public function definition(): array
     {
         return [
-            'name'                  => fake()->name(),
-            'email'                 => fake()->unique()->safeEmail(),
-            'email_verified_at'     => now(),
-            'password'              => static::$password ??= Hash::make('password'),
-            'remember_token'        => Str::random(10),
-            'status'                => 'ACTIVE',
-            'must_change_password'  => false,
-            'failed_login_attempts' => 0,
+            'name' => fake()->name(),
+            'username' => fake()->unique()->userName(),
+            'employee_id' => (string) fake()->unique()->numberBetween(1000, 999999),
+            'password' => static::$password ??= Hash::make('password'),
+            'is_active' => true,
+            'sql_server_verified_at' => now(),
+            'remember_token' => Str::random(10),
         ];
-    }
-
-    public function unverified(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'email_verified_at' => null,
-        ]);
-    }
-
-    public function pendingFirstLogin(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'status'               => 'PENDING_FIRST_LOGIN',
-            'must_change_password' => true,
-        ]);
-    }
-
-    public function locked(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'status'                => 'LOCKED',
-            'failed_login_attempts' => 5,
-            'locked_at'             => now(),
-        ]);
     }
 
     public function inactive(): static
     {
         return $this->state(fn (array $attributes) => [
-            'status' => 'INACTIVE',
-        ]);
-    }
-
-    public function suspended(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'status' => 'SUSPENDED',
+            'is_active' => false,
         ]);
     }
 }

@@ -66,19 +66,20 @@ class SWRHAUserProvider implements UserProvider
         if (! $localUser) {
             $localUser = $this->createLocalUser($sqlUser);
         } else {
-            $dirty = false;
+            // Display name comes from EmployeeName (the arrears-DB join); sync it on
+            // each login so a corrected name in the source system propagates here.
+            $displayName = $this->resolveDisplayName($sqlUser);
+
+            if ($localUser->name !== $displayName) {
+                $localUser->name = $displayName;
+            }
 
             if ((bool) $localUser->is_active !== (bool) $sqlUser->IsActive) {
                 $localUser->is_active = (bool) $sqlUser->IsActive;
-                $dirty = true;
             }
 
             $localUser->sql_server_verified_at = now();
-            $dirty = true;
-
-            if ($dirty) {
-                $localUser->save();
-            }
+            $localUser->save();
         }
 
         return $localUser;
@@ -102,10 +103,22 @@ class SWRHAUserProvider implements UserProvider
         }
     }
 
+    /**
+     * The user's display name for the UI (header, sidebar, profile).
+     * Prefer EmployeeName from the arrears-DB join; fall back to UserName when
+     * it is NULL (no matching arrears row) or blank so the name is never empty.
+     */
+    private function resolveDisplayName(SWRHAExpenseControlUser $sqlUser): string
+    {
+        $employeeName = trim((string) ($sqlUser->EmployeeName ?? ''));
+
+        return $employeeName !== '' ? $employeeName : $sqlUser->UserName;
+    }
+
     private function createLocalUser(SWRHAExpenseControlUser $sqlUser): User
     {
         return User::create([
-            'name' => $sqlUser->UserName,
+            'name' => $this->resolveDisplayName($sqlUser),
             'username' => $sqlUser->UserName,
             // EmployeeID is a string in SQL Server — never cast to int (that would
             // drop leading zeros / mangle non-numeric IDs). Trim padding, keep null.

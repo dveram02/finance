@@ -66,6 +66,15 @@ class EnsureUserIsActive
         // Query succeeded — this result is authoritative. A missing row means the
         // account was removed in the source system, so deactivating is correct here.
         $user->is_active = (bool) ($sqlUser?->IsActive ?? false);
+
+        // Keep the display name (EmployeeName from the arrears-DB join) in sync so a
+        // corrected name propagates without a re-login. Fall back to UserName when the
+        // join yields no name. Skip when the row is gone (the user is being logged out).
+        if ($sqlUser) {
+            $employeeName = trim((string) ($sqlUser->EmployeeName ?? ''));
+            $user->name = $employeeName !== '' ? $employeeName : $sqlUser->UserName;
+        }
+
         $user->sql_server_verified_at = now();
         $user->save();
     }
