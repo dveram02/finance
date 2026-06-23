@@ -77,7 +77,9 @@ onMounted(() => {
 
 <template>
   <!-- Root wrapper — dark gradient in dark mode, light gradient in light mode -->
-  <div class="flex flex-col min-h-screen bg-surface-2 transition-colors duration-300">
+  <div class="relative flex flex-col min-h-screen overflow-hidden bg-[#eef3f6] transition-colors duration-300 dark:bg-[#07111f]">
+    <div class="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(14,116,144,0.14),transparent_28%),radial-gradient(circle_at_88%_8%,rgba(245,158,11,0.12),transparent_24%),linear-gradient(135deg,#f8fafc_0%,#eef3f6_45%,#dde8ef_100%)] dark:bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.12),transparent_28%),radial-gradient(circle_at_88%_8%,rgba(245,158,11,0.1),transparent_24%),linear-gradient(135deg,#07111f_0%,#0c1c2f_48%,#102638_100%)]"></div>
+    <div class="pointer-events-none fixed inset-0 opacity-[0.18] dark:opacity-[0.12]" style="background-image: linear-gradient(rgba(15, 23, 42, .11) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, .11) 1px, transparent 1px); background-size: 44px 44px;"></div>
 
     <!-- Sidebar -->
     <SideBar
@@ -106,7 +108,7 @@ onMounted(() => {
     </transition>
 
     <!-- Main layout container -->
-    <div class="flex flex-col flex-1 md:ml-72 overflow-hidden transition-all duration-300">
+    <div class="relative z-10 flex flex-col flex-1 md:ml-72 overflow-hidden transition-all duration-300">
 
       <!-- Header -->
       <HeaderBar
@@ -150,7 +152,7 @@ onMounted(() => {
              rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300
              flex items-center justify-center z-40
              opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto"
-      style="background: linear-gradient(135deg, #d97706, #b45309);"
+      style="background: linear-gradient(135deg, #0891b2, #b45309);"
       aria-label="Back to top"
     >
       <i class="fas fa-arrow-up text-xs"></i>

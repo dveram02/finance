@@ -293,22 +293,23 @@ const categoryBarOptions = computed(() => ({
 
     <!-- Welcome header -->
     <div
-      class="rounded-xl overflow-hidden border border-line shadow-sm"
+      class="rounded-2xl overflow-hidden border border-white/40 shadow-xl shadow-slate-950/10 dark:border-white/10"
       :style="isDark
-        ? 'background: linear-gradient(135deg, #0b1625 0%, #0e2040 50%, #0b1625 100%);'
-        : 'background: linear-gradient(135deg, #1d4ed8 0%, #4338ca 60%, #6d28d9 100%);'"
+        ? 'background: linear-gradient(135deg, #07111f 0%, #0e2638 52%, #07111f 100%);'
+        : 'background: linear-gradient(135deg, #082f49 0%, #0e7490 54%, #0f172a 100%);'"
     >
       <div class="relative px-7 py-6 overflow-hidden">
-        <!-- Subtle pattern overlay -->
-        <div class="absolute inset-0 opacity-5" style="background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.4) 1px, transparent 0); background-size: 24px 24px;"></div>
-        <!-- Gold accent top bar -->
-        <div class="absolute top-0 left-0 right-0 h-0.5" style="background: linear-gradient(90deg, #d97706, #f59e0b 40%, transparent 100%);"></div>
+        <div class="absolute inset-0 opacity-[0.09]" style="background-image: linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px); background-size: 32px 32px;"></div>
+        <div class="absolute -right-12 -top-20 h-44 w-44 rounded-full bg-cyan-300/20 blur-3xl"></div>
+        <div class="absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-amber-300/20 blur-2xl"></div>
+        <div class="absolute top-0 left-0 right-0 h-0.5" style="background: linear-gradient(90deg, #0891b2, #d97706 45%, transparent 100%);"></div>
         <div class="relative">
+          <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">Finance command center</p>
           <h2 class="font-display text-2xl font-bold text-white">
             Welcome back, <span class="text-amber-300">{{ userName }}</span>
           </h2>
-          <p class="mt-1 text-sm text-blue-100/70">
-            Finance Management &mdash; {{ today }}
+          <p class="mt-1 text-sm text-cyan-50/75">
+            Finance Management - {{ today }}
           </p>
         </div>
       </div>

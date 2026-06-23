@@ -157,12 +157,13 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
       'md:translate-x-0',
       mobileOpen ? 'translate-x-0' : '-translate-x-full',
       'w-72',
-      'bg-surface border-r border-line shadow-md',
+      'bg-white/82 dark:bg-[#07111f]/86 border-r border-white/70 dark:border-white/10 shadow-xl shadow-slate-950/8 backdrop-blur-xl',
     ]"
   >
     <!-- Logo / header -->
-    <div class="relative px-5 py-5 border-b border-line">
-      <div class="flex items-center justify-between">
+    <div class="relative px-5 py-5 border-b border-white/60 dark:border-white/10">
+      <div class="pointer-events-none absolute inset-0 bg-gradient-to-br from-cyan-500/8 via-transparent to-amber-500/10 dark:from-cyan-300/10 dark:to-amber-300/8"></div>
+      <div class="relative flex items-center justify-between">
         <div class="flex items-center space-x-3">
           <img
             :src="isDark ? '/images/logo_white.png' : '/images/logo.png'"
@@ -185,7 +186,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
         </button>
       </div>
       <!-- Amber accent bar -->
-      <div class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-amber-500/60 via-amber-400/30 to-transparent"></div>
+      <div class="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-cyan-500/50 via-amber-400/50 to-transparent"></div>
     </div>
 
     <!-- Navigation -->
@@ -207,11 +208,11 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                   class="group w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 relative"
                   :class="
                     isChildActive(item) || item.open
-                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                      ? 'bg-cyan-50 text-cyan-800 dark:bg-cyan-300/10 dark:text-cyan-200'
                       : 'text-tx-body hover:bg-surface-3 hover:text-tx-primary'
                   "
                 >
-                  <div v-if="isChildActive(item) || item.open" class="absolute left-0 inset-y-1.5 w-0.5 bg-amber-500 rounded-r-sm"></div>
+                  <div v-if="isChildActive(item) || item.open" class="absolute left-0 inset-y-1.5 w-0.5 bg-gradient-to-b from-cyan-500 to-amber-500 rounded-r-sm"></div>
 
                   <div class="flex items-center space-x-3 pl-1">
                     <i :class="`${item.icon} w-4 text-center text-sm`"></i>
@@ -241,7 +242,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                         class="group block px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 relative"
                         :class="
                           childActive(c)
-                            ? 'bg-amber-50 text-amber-700 font-semibold dark:bg-amber-500/10 dark:text-amber-400'
+                            ? 'bg-cyan-50 text-cyan-800 font-semibold dark:bg-cyan-300/10 dark:text-cyan-200'
                             : 'text-tx-muted hover:text-tx-primary hover:bg-surface-2'
                         "
                         @click="
@@ -250,7 +251,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                         "
                       >
                         <span class="relative z-10">{{ c.name }}</span>
-                        <div v-if="childActive(c)" class="absolute left-0 inset-y-1.5 w-0.5 bg-amber-500 rounded-r-full"></div>
+                        <div v-if="childActive(c)" class="absolute left-0 inset-y-1.5 w-0.5 bg-gradient-to-b from-cyan-500 to-amber-500 rounded-r-full"></div>
                       </Link>
                     </li>
                   </ul>
@@ -264,7 +265,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                   class="group flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 relative"
                   :class="
                     itemActive(item)
-                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                      ? 'bg-cyan-50 text-cyan-800 dark:bg-cyan-300/10 dark:text-cyan-200'
                       : 'text-tx-body hover:bg-surface-3 hover:text-tx-primary'
                   "
                   @click="
@@ -272,7 +273,7 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
                     $emit('close-mobile');
                   "
                 >
-                  <div v-if="itemActive(item)" class="absolute left-0 inset-y-1.5 w-0.5 bg-amber-500 rounded-r-sm"></div>
+                  <div v-if="itemActive(item)" class="absolute left-0 inset-y-1.5 w-0.5 bg-gradient-to-b from-cyan-500 to-amber-500 rounded-r-sm"></div>
 
                   <div class="flex items-center space-x-3 pl-1">
                     <i :class="`${item.icon} w-4 text-center text-sm`"></i>

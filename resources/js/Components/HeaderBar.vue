@@ -164,7 +164,7 @@ const getStatusBadgeColor = (status) => {
 </script>
 
 <template>
-  <header class="sticky top-0 bg-surface/90 backdrop-blur-md border-b border-line/50 z-30 transition-all duration-300 w-full shadow-sm">
+  <header class="sticky top-0 bg-white/78 backdrop-blur-xl border-b border-white/60 z-30 transition-all duration-300 w-full shadow-sm shadow-slate-950/5 dark:bg-[#07111f]/78 dark:border-white/10">
     <div class="px-5 sm:px-7 py-3.5">
 
       <div class="flex items-center justify-between gap-4">
@@ -182,7 +182,7 @@ const getStatusBadgeColor = (status) => {
 
           <!-- Greeting -->
           <div class="flex items-center gap-3 min-w-0">
-            <div class="hidden sm:flex w-9 h-9 rounded-xl items-center justify-center flex-shrink-0 bg-surface-3">
+            <div class="hidden sm:flex w-9 h-9 rounded-xl items-center justify-center flex-shrink-0 bg-cyan-50 ring-1 ring-cyan-500/10 dark:bg-cyan-300/10 dark:ring-cyan-300/15">
               <i :class="`fas ${greetingIcon} text-base`"></i>
             </div>
             <div class="min-w-0">
@@ -246,7 +246,7 @@ const getStatusBadgeColor = (status) => {
                     <button
                       v-if="unreadCount > 0"
                       @click="markAllAsRead"
-                      class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium px-2 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                    class="text-xs text-cyan-700 hover:text-cyan-800 dark:text-cyan-300 dark:hover:text-cyan-200 font-medium px-2 py-1 rounded hover:bg-cyan-50 dark:hover:bg-cyan-900/20 transition-colors"
                     >
                       Mark all read
                     </button>
@@ -355,7 +355,7 @@ const getStatusBadgeColor = (status) => {
     <!-- Page-load progress bar -->
     <div
       class="h-0.5 transform origin-left transition-transform duration-300"
-      style="background: linear-gradient(90deg, #d97706, #f59e0b, #fbbf24);"
+      style="background: linear-gradient(90deg, #0891b2, #d97706, #fbbf24);"
       :class="props.isLoading ? 'scale-x-100' : 'scale-x-0'"
     ></div>
   </header>
