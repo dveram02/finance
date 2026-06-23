@@ -12,7 +12,9 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('username')->unique();
-            $table->unsignedInteger('employee_id')->nullable();
+            // EmployeeID is a string in SQL Server (may be alphanumeric / zero-padded),
+            // so the local mirror must be a string too — never an integer.
+            $table->string('employee_id')->nullable();
             $table->string('password');
             $table->boolean('is_active')->default(true);
             $table->rememberToken();

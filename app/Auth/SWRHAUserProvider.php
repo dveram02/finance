@@ -22,7 +22,7 @@ class SWRHAUserProvider implements UserProvider
     {
         $user = ($this->model)::find($identifier);
 
-        if (!$user || $user->getRememberToken() !== $token) {
+        if (! $user || $user->getRememberToken() !== $token) {
             return null;
         }
 
@@ -40,20 +40,20 @@ class SWRHAUserProvider implements UserProvider
         $username = $credentials['username'] ?? null;
         $password = $credentials['password'] ?? null;
 
-        if (!$username || !$password) {
+        if (! $username || ! $password) {
             return null;
         }
 
         $sqlUser = $this->findSqlServerUser($username);
 
         \Log::debug('SWRHAUserProvider', [
-            'username'  => $username,
-            'sqlUser'   => (bool) $sqlUser,
-            'isActive'  => $sqlUser?->IsActive,
-            'pwMatch'   => $sqlUser ? ($sqlUser->UserPassword === $password) : null,
+            'username' => $username,
+            'sqlUser' => (bool) $sqlUser,
+            'isActive' => $sqlUser?->IsActive,
+            'pwMatch' => $sqlUser ? ($sqlUser->UserPassword === $password) : null,
         ]);
 
-        if (!$sqlUser || !$sqlUser->IsActive) {
+        if (! $sqlUser || ! $sqlUser->IsActive) {
             return null;
         }
 
@@ -63,7 +63,7 @@ class SWRHAUserProvider implements UserProvider
 
         $localUser = User::where('username', $sqlUser->UserName)->first();
 
-        if (!$localUser) {
+        if (! $localUser) {
             $localUser = $this->createLocalUser($sqlUser);
         } else {
             $dirty = false;
@@ -97,6 +97,7 @@ class SWRHAUserProvider implements UserProvider
             return SWRHAExpenseControlUser::where('UserName', $username)->first();
         } catch (\Throwable $e) {
             \Log::error('SWRHAUserProvider SQL Server error', ['message' => $e->getMessage()]);
+
             return null;
         }
     }
@@ -104,11 +105,13 @@ class SWRHAUserProvider implements UserProvider
     private function createLocalUser(SWRHAExpenseControlUser $sqlUser): User
     {
         return User::create([
-            'name'                   => $sqlUser->UserName,
-            'username'               => $sqlUser->UserName,
-            'employee_id'            => (int) $sqlUser->EmployeeID,
-            'password'               => Hash::make(Str::random(40)),
-            'is_active'              => (bool) $sqlUser->IsActive,
+            'name' => $sqlUser->UserName,
+            'username' => $sqlUser->UserName,
+            // EmployeeID is a string in SQL Server — never cast to int (that would
+            // drop leading zeros / mangle non-numeric IDs). Trim padding, keep null.
+            'employee_id' => $sqlUser->EmployeeID !== null ? trim((string) $sqlUser->EmployeeID) : null,
+            'password' => Hash::make(Str::random(40)),
+            'is_active' => (bool) $sqlUser->IsActive,
             'sql_server_verified_at' => now(),
         ]);
     }

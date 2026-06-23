@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Concerns\DashboardDataTransforms;
 use App\Concerns\ResolvesFiscalYear;
 use App\Models\BudgetAllocation;
+use App\Models\MonthlyExpenditure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -12,6 +14,7 @@ use Inertia\Response;
 
 class DashboardController extends Controller
 {
+    use DashboardDataTransforms;
     use ResolvesFiscalYear;
 
     public function index(Request $request): Response
@@ -24,14 +27,31 @@ class DashboardController extends Controller
         ['fiscalYear' => $fiscalYear, 'totalBudget' => $totalBudget, 'available' => $budgetAvailable]
             = $this->budgetTotal($username);
 
+        // The expenditure window is "up to the current fiscal month" for the
+        // active FY (whole year for a past FY, nothing for a future FY).
+        $cutoff = $this->resolveCutoff($fiscalYear);
+
+        $expenditure = $this->expenditureData($username, $fiscalYear, $cutoff);
+
         return Inertia::render('Dashboard', [
             'userName' => $request->user()->name,
             'fiscalYear' => $fiscalYear,
             'totalBudget' => $totalBudget,
             'budgetAvailable' => $budgetAvailable,
-            'monthlyExpenditure' => $this->monthlyExpenditureData(),
-            'budgetVsActual' => $this->budgetVsActualData($totalBudget),
-            'expenditureByCategory' => $this->expenditureByCategoryData(),
+            'expenditureAvailable' => $expenditure['available'],
+            'expenditureWindowStarted' => $cutoff > 0,
+            'ytdExpenditure' => $expenditure['ytd'],
+            'latestPeriodLabel' => $expenditure['latestPeriodLabel'],
+            'monthlyExpenditure' => $this->monthlyBarData($fiscalYear, $cutoff, $expenditure['periodTotals']),
+            'budgetVsActual' => $this->budgetVsActualData(
+                $totalBudget,
+                $budgetAvailable,
+                $expenditure['available'],
+                $fiscalYear,
+                $cutoff,
+                $expenditure['periodTotals']
+            ),
+            'expenditureByCategory' => $expenditure['byCategory'],
         ]);
     }
 
@@ -43,7 +63,9 @@ class DashboardController extends Controller
      * Resolve the active fiscal year and its total allocation for the user.
      * The source view joins remote GP linked servers, so both the year list
      * and the SUM are cached on the dedicated budget file store. A SQL Server
-     * outage degrades to an unavailable state — never a fake zero budget.
+     * outage degrades to an unavailable state — never a fake zero budget. A
+     * successful query that returns no years for the user is also treated as
+     * unavailable (no budget configured ≠ a real zero allocation).
      *
      * @return array{fiscalYear:int, totalBudget:float, available:bool}
      */
@@ -67,6 +89,15 @@ class DashboardController extends Controller
                     ->values()
                     ->all()
             ));
+
+            if ($years->isEmpty()) {
+                // Query succeeded but this user has no budget data — not a real zero.
+                return [
+                    'fiscalYear' => $currentFiscalYear,
+                    'totalBudget' => 0.0,
+                    'available' => false,
+                ];
+            }
 
             $activeFiscalYear = $this->resolveFiscalYear(null, $years, $currentFiscalYear);
 
@@ -99,48 +130,116 @@ class DashboardController extends Controller
     }
 
     // =========================================================================
-    // Chart data helpers — actuals are placeholders until the chart SQL Server
-    // is configured; only the budget reference line is live.
+    // Live expenditure — from dbo.MonthlyExpenditure (active FY, up to cutoff)
     // =========================================================================
 
-    private function monthlyExpenditureData(): array
+    /**
+     * Per-month net expenditure for the active FY up to $cutoff, plus the YTD
+     * total and a net-by-category breakdown. Read-only SQL Server source, so it
+     * is wrapped in try/catch and degrades to an unavailable state. Cached on the
+     * dedicated expenditure file store — the dashboard takes no per-request
+     * filters, so the only cache dimensions are (user, FY, cutoff).
+     *
+     * @return array{available:bool, ytd:float, latestPeriodLabel:?string,
+     *               periodTotals:array<int,array{PeriodID:int,TRXPeriod:string,total:float}>,
+     *               byCategory:array{labels:array<int,string>, data:array<int,float>}}
+     */
+    private function expenditureData(string $username, int $fiscalYear, int $cutoff): array
     {
-        return [
-            'labels' => ['November', 'December', 'January', 'February', 'March', 'April'],
-            'datasets' => [
-                [
-                    'label' => 'Expenditure (TTD)',
-                    'data' => [142500, 98300, 167200, 134800, 189600, 155400],
-                ],
-            ],
-        ];
+        $cache = Cache::store(config('expenditure.cache.store'));
+        $ttl = config('expenditure.cache.minutes') * 60;
+
+        try {
+            // $cutoff is in the key so the cache rolls forward when the fiscal
+            // month advances; stale keys expire on their own TTL.
+            return $cache->remember(
+                "dashboard:expenditure:{$username}:{$fiscalYear}:{$cutoff}",
+                $ttl,
+                function () use ($username, $fiscalYear, $cutoff) {
+                    $base = fn () => MonthlyExpenditure::forUser($username)
+                        ->forYear((string) $fiscalYear)
+                        ->where('PeriodID', '<=', $cutoff);
+
+                    // Per-month net (≤ cutoff rows): powers YTD, the bar chart,
+                    // and the cumulative Actual line.
+                    $byMonth = $base()
+                        ->select('PeriodID', 'TRXPeriod')
+                        ->selectRaw('SUM(NetChange) AS total')
+                        ->groupBy('PeriodID', 'TRXPeriod')
+                        ->orderBy('PeriodID')
+                        ->get();
+
+                    // Net by category (MainGroup); negatives allowed (bar chart).
+                    $byCat = $base()
+                        ->select('MainGroup')
+                        ->selectRaw('SUM(NetChange) AS total')
+                        ->groupBy('MainGroup')
+                        ->orderByDesc('total')
+                        ->get();
+
+                    // SUM(NetChange) is uncast → comes back a string; cast to float.
+                    $periodTotals = $byMonth->map(fn ($m) => [
+                        'PeriodID' => (int) $m->PeriodID,
+                        'TRXPeriod' => $m->TRXPeriod,
+                        'total' => (float) $m->total,
+                    ])->all();
+
+                    return [
+                        'available' => true,
+                        'ytd' => (float) array_sum(array_column($periodTotals, 'total')),
+                        // The CURRENT fiscal month (not the last row) — so "through
+                        // JUN, 26" is correct even before the current month posts.
+                        'latestPeriodLabel' => $this->fiscalMonthLabels($fiscalYear)[$cutoff] ?? null,
+                        'periodTotals' => $periodTotals,
+                        'byCategory' => $this->topCategories($byCat, 8),
+                    ];
+                }
+            );
+        } catch (\Throwable $e) {
+            Log::error('Dashboard expenditure query failed.', [
+                'username' => $username,
+                'fy' => $fiscalYear,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return [
+                'available' => false,
+                'ytd' => 0.0,
+                'latestPeriodLabel' => null,
+                'periodTotals' => [],
+                'byCategory' => ['labels' => [], 'data' => []],
+            ];
+        }
     }
 
-    private function budgetVsActualData(float $totalBudget): array
-    {
-        $labels = ['November', 'December', 'January', 'February', 'March', 'April'];
+    // =========================================================================
+    // Chart shaping — budget burn-up (flat annual budget + cumulative actual)
+    // =========================================================================
 
-        return [
-            'labels' => $labels,
-            'datasets' => [
-                [
-                    // Flat reference line at the full annual allocation.
-                    'label' => 'Annual Budget',
-                    'data' => array_fill(0, count($labels), $totalBudget),
-                ],
-                [
-                    'label' => 'Actual',
-                    'data' => [142500, 98300, 167200, 134800, 189600, 155400],
-                ],
-            ],
-        ];
-    }
+    private function budgetVsActualData(
+        float $totalBudget,
+        bool $budgetAvailable,
+        bool $expenditureAvailable,
+        int $fiscalYear,
+        int $cutoff,
+        array $periodTotals
+    ): array {
+        $labels = array_values($this->fiscalMonthLabels($fiscalYear));   // 12 labels, period order
 
-    private function expenditureByCategoryData(): array
-    {
-        return [
-            'labels' => ['Salaries', 'Medical Supplies', 'Utilities', 'Maintenance', 'Transport', 'Other'],
-            'data' => [412000, 198500, 87300, 64200, 43100, 31900],
-        ];
+        // Blank the actual line entirely when the source is down (all null) so it
+        // is never mistaken for genuine zero spend. A real new FY with no rows yet
+        // still shows a legitimate cumulative 0 because $expenditureAvailable is true.
+        $actual = $expenditureAvailable
+            ? $this->cumulativeSeries($cutoff, $periodTotals)
+            : array_fill(0, 12, null);
+
+        $datasets = [];
+        // No fake budget line when the budget source is unavailable — omit it.
+        if ($budgetAvailable) {
+            $datasets[] = ['label' => 'Annual Budget', 'data' => array_fill(0, 12, $totalBudget)];
+        }
+        $datasets[] = ['label' => 'Actual (cumulative)', 'data' => $actual];
+
+        return ['labels' => $labels, 'datasets' => $datasets];
     }
 }
