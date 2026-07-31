@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AllocationLineExpenditureController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BudgetAllocationController;
 use App\Http\Controllers\DashboardController;
@@ -26,6 +27,7 @@ Route::middleware(['auth', 'active.user'])->group(function () {
     Route::get('/budget-allocations', [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
     Route::get('/monthly-expenditure', [MonthlyExpenditureController::class, 'index'])->name('monthly-expenditure.index');
     Route::get('/department-expenditure', [DepartmentExpenditureController::class,   'index'])->name('department-expenditure.index');
+    Route::get('/allocation-line-expenditure', [AllocationLineExpenditureController::class, 'index'])->name('allocation-line-expenditure.index');
 });
 
 // Logout

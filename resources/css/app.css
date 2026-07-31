@@ -122,3 +122,130 @@ main::-webkit-scrollbar-thumb:hover {
 .dark main::-webkit-scrollbar-thumb:hover {
     background: rgb(71 85 105);
 }
+
+/* ============================================================================
+   Ledger tables (Department Expenditure, Allocation Line Expenditure, …)
+
+   The wide fiscal-year tables share their mechanics — frozen header, frozen
+   totals row, frozen identity columns, column crosshair, quarter rules. Those
+   live here so the pages cannot drift apart; each page supplies only its own
+   column WIDTHS and sticky OFFSETS in scoped styles, because the column sets
+   differ between views.
+   ========================================================================== */
+
+/* Fixed layout makes each page's colgroup widths binding. `width: max-content`
+   stops the browser redistributing spare space back into the columns, which
+   would shift the real column edges out from under the sticky offsets. */
+.ledger-table {
+    table-layout: fixed;
+    width: max-content;
+}
+
+/* ── Frozen header and totals row ────────────────────────────────────────────
+   Layering: cells frozen on two axes must outrank cells frozen on one, or the
+   identity columns slide over the header as it scrolls.
+     30  corners (frozen vertically AND horizontally)
+     20  header / footer cells (vertical only)
+     10  identity / summary columns (horizontal only)                        */
+.ledger-table thead th,
+.ledger-table tfoot td {
+    position: sticky;
+    z-index: 20;
+    background-color: rgb(var(--color-surface-2));
+}
+
+.ledger-table thead th {
+    top: 0;
+    /* Hairlines drawn as shadows so they ride with the frozen row rather than
+       scrolling away with the table's own borders. */
+    box-shadow: inset 0 -1px 0 rgb(var(--color-line));
+}
+
+.ledger-table tfoot td {
+    bottom: 0;
+    box-shadow: inset 0 1px 0 rgb(var(--color-line));
+}
+
+/* ── Frozen columns ──────────────────────────────────────────────────────── */
+/* Opaque base is load-bearing: these cells slide over the month columns, so any
+   transparency lets the scrolled content show through them. */
+.ledger-table .ledger-frz {
+    background-color: rgb(var(--color-surface));
+}
+
+.ledger-table thead .ledger-frz,
+.ledger-table tfoot .ledger-frz {
+    background-color: rgb(var(--color-surface-2));
+    z-index: 30;
+}
+
+@media (min-width: 1024px) {
+    .ledger-table .ledger-frz {
+        position: sticky;
+        z-index: 10;
+    }
+
+    .ledger-table thead .ledger-frz,
+    .ledger-table tfoot .ledger-frz {
+        z-index: 30;
+    }
+
+    /* Boundary columns get a depth cue that content passes beneath. Corners need
+       BOTH that and the frozen-row hairline; a single box-shadow declaration
+       replaces rather than merges, so the combinations are spelled out. */
+    .ledger-table tbody .ledger-edge-l { box-shadow: 8px 0 10px -8px rgba(2, 6, 23, 0.28); }
+    .ledger-table tbody .ledger-edge-r { box-shadow: -8px 0 10px -8px rgba(2, 6, 23, 0.28); }
+
+    .ledger-table thead .ledger-edge-l {
+        box-shadow: inset 0 -1px 0 rgb(var(--color-line)), 8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+    .ledger-table thead .ledger-edge-r {
+        box-shadow: inset 0 -1px 0 rgb(var(--color-line)), -8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+    .ledger-table tfoot .ledger-edge-l {
+        box-shadow: inset 0 1px 0 rgb(var(--color-line)), 8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+    .ledger-table tfoot .ledger-edge-r {
+        box-shadow: inset 0 1px 0 rgb(var(--color-line)), -8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+}
+
+/* Row hover must not reintroduce transparency. The tint is layered as a
+   background-IMAGE over the opaque background-COLOR, which composites to an
+   opaque result. Values mirror the row's own hover utilities so the frozen
+   cells land on an identical colour instead of reading as a separate shade. */
+.ledger-table tbody tr:hover .ledger-frz {
+    background-image: linear-gradient(rgba(255, 251, 235, 0.4), rgba(255, 251, 235, 0.4));
+}
+.dark .ledger-table tbody tr:hover .ledger-frz {
+    background-image: linear-gradient(rgba(120, 53, 15, 0.1), rgba(120, 53, 15, 0.1));
+}
+
+/* ── Column crosshair ────────────────────────────────────────────────────────
+   A background-COLOR so per-cell heat shading, which is a background-IMAGE,
+   layers on top instead of being overwritten. Cyan against the row's amber
+   keeps both axes readable where they cross. */
+.ledger-table .is-col-hover { background-color: rgba(14, 165, 233, 0.09); }
+.dark .ledger-table .is-col-hover { background-color: rgba(34, 211, 238, 0.1); }
+
+/* Quarter boundaries, so twelve months read as four groups. */
+.ledger-table .quarter-edge { border-left: 1px solid rgb(var(--color-line)); }
+
+/* Fixed layout clips rather than wraps, so long unbroken words in the identity
+   columns need explicit permission to break. */
+.ledger-table .ledger-wrap { overflow-wrap: anywhere; }
+
+/* Fixed-format account identifiers: one line, ellipsis rather than wrapping. */
+.ledger-table .acct-no {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The scroll region is focusable so arrow-key scrolling works without a mouse.
+   Ring only for keyboard users, not on the click that precedes scrolling. */
+.table-scroll:focus { outline: none; }
+.table-scroll:focus-visible {
+    outline: 2px solid rgba(251, 191, 36, 0.75);
+    outline-offset: -2px;
+}
