@@ -7,6 +7,7 @@ use App\Models\BudgetAllocation;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -174,7 +175,15 @@ class BudgetAllocationController extends Controller
                 ->withQueryString();
 
         } catch (\Throwable $e) {
-            session()->flash('warning', 'Could not connect to the financial data source. Please try again later.');
+            // See MonthlyExpenditureController — the generic copy must not hide the
+            // cause; this catch fires on any SQL failure, not just connectivity.
+            Log::error('Budget allocation query failed.', [
+                'username' => $username,
+                'fy' => $request->input('fy'),
+                'exception' => $e->getMessage(),
+            ]);
+
+            session()->flash('warning', 'The financial data source is unavailable. Please try again later.');
 
             $currentFiscalYear = $this->currentFiscalYear();
             $filters['fy'] = $filters['fy'] ?? $currentFiscalYear;

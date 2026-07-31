@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BudgetAllocationController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DepartmentExpenditureController;
 use App\Http\Controllers\MonthlyExpenditureController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,7 @@ Route::middleware(['auth', 'active.user'])->group(function () {
     Route::get('/profile', [ProfileController::class,           'view'])->name('profile.view');
     Route::get('/budget-allocations', [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
     Route::get('/monthly-expenditure', [MonthlyExpenditureController::class, 'index'])->name('monthly-expenditure.index');
+    Route::get('/department-expenditure', [DepartmentExpenditureController::class,   'index'])->name('department-expenditure.index');
 });
 
 // Logout

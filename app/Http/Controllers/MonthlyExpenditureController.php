@@ -7,6 +7,7 @@ use App\Models\MonthlyExpenditure;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -207,7 +208,17 @@ class MonthlyExpenditureController extends Controller
                 ->withQueryString();
 
         } catch (\Throwable $e) {
-            session()->flash('warning', 'Could not connect to the financial data source. Please try again later.');
+            // The user-facing copy stays generic, but the cause must be logged —
+            // this catch covers *any* SQL failure (a broken view, a renamed base
+            // table), not just an unreachable server, and a silent swallow leaves
+            // no trail to tell those apart.
+            Log::error('Monthly expenditure query failed.', [
+                'username' => $username,
+                'fy' => $request->input('fy'),
+                'exception' => $e->getMessage(),
+            ]);
+
+            session()->flash('warning', 'The financial data source is unavailable. Please try again later.');
 
             $currentFiscalYear = $this->currentFiscalYear();
             $filters['fy'] = $filters['fy'] ?? $currentFiscalYear;
