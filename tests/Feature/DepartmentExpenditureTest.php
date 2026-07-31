@@ -42,6 +42,8 @@ class DepartmentExpenditureTest extends TestCase
                 ->has('stats.totalExpenditure')
                 ->has('stats.highestMonth')
                 ->has('stats.accountCount')
+                ->has('totals.months', 12)
+                ->has('totals.ytd')
                 ->has('fyNav')
                 ->where('isScaffold', true)
             );
@@ -70,6 +72,42 @@ class DepartmentExpenditureTest extends TestCase
                 );
             }
         });
+    }
+
+    public function test_column_totals_cover_the_whole_filtered_set_not_just_the_visible_page(): void
+    {
+        $props = $this->visit()->viewData('page')['props'];
+
+        // Guard the premise: with one page this assertion would prove nothing.
+        $this->assertGreaterThan(
+            count($props['rows']['data']), $props['rows']['total'],
+            'Expected the sample data to span more than one page.'
+        );
+
+        $pageOnly = [];
+        foreach (DepartmentExpenditureController::MONTHS as $month) {
+            $pageOnly[$month] = array_sum(array_column($props['rows']['data'], $month));
+        }
+
+        // Every month's total must exceed what page one alone accounts for.
+        foreach (DepartmentExpenditureController::MONTHS as $month) {
+            if ($pageOnly[$month] <= 0) {
+                continue;
+            }
+
+            $this->assertGreaterThan(
+                $pageOnly[$month], (float) $props['totals']['months'][$month],
+                "Total for {$month} looks like it only sums the current page."
+            );
+        }
+
+        // And the grand total must reconcile with the twelve column totals.
+        $this->assertEqualsWithDelta(
+            (float) $props['totals']['ytd'],
+            array_sum(array_map('floatval', $props['totals']['months'])),
+            0.05,
+            'Grand total does not reconcile with the monthly column totals.'
+        );
     }
 
     public function test_months_after_the_current_fiscal_period_are_flagged_future(): void

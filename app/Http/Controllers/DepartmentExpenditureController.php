@@ -82,21 +82,37 @@ class DepartmentExpenditureController extends Controller
 
         $filtered = $filtered->values();
 
-        // ── Stats over the whole filtered set, before pagination ─────────────────
+        // ── Stats and column totals over the whole filtered set ──────────────────
+        // Deliberately computed before pagination: a totals row that only summed
+        // the visible 25 rows would look authoritative and be wrong.
         $monthTotals = [];
         foreach (self::MONTHS as $m) {
-            $monthTotals[$m] = (float) $filtered->sum($m);
+            $monthTotals[$m] = round((float) $filtered->sum($m), 2);
         }
-        arsort($monthTotals);
-        $highestMonthKey = $filtered->isEmpty() ? null : array_key_first($monthTotals);
+
+        // Ranked on a copy — sorting $monthTotals itself would destroy the fiscal
+        // month ordering the totals row depends on.
+        $highestMonthKey = null;
+        if ($filtered->isNotEmpty()) {
+            $ranked = $monthTotals;
+            arsort($ranked);
+            $highestMonthKey = array_key_first($ranked);
+        }
+
+        $grandTotal = round((float) $filtered->sum('YTDTotal'), 2);
 
         $stats = [
-            'totalExpenditure' => (float) $filtered->sum('YTDTotal'),
+            'totalExpenditure' => $grandTotal,
             'highestMonth' => [
                 'label' => $highestMonthKey ? $this->monthLabel($highestMonthKey, (int) $activeFiscalYear) : null,
                 'amount' => $highestMonthKey ? $monthTotals[$highestMonthKey] : 0.0,
             ],
             'accountCount' => $filtered->count(),
+        ];
+
+        $totals = [
+            'months' => $monthTotals,
+            'ytd' => $grandTotal,
         ];
 
         // ── Paginate ─────────────────────────────────────────────────────────────
@@ -120,6 +136,7 @@ class DepartmentExpenditureController extends Controller
             'years' => $years->all(),
             'months' => $this->monthHeadings((int) $activeFiscalYear),
             'stats' => $stats,
+            'totals' => $totals,
             'filters' => $filters,
             'activeFiscalYear' => $activeFiscalYear,
             'currentFiscalYear' => $currentFiscalYear,

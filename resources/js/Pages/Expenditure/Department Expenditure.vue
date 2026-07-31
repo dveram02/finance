@@ -11,6 +11,7 @@ const props = defineProps({
     months:            Array,
     years:             Array,
     stats:             Object,
+    totals:            Object,
     filters:           Object,
     activeFiscalYear:  [Number, String],
     currentFiscalYear: [Number, String],
@@ -233,6 +234,43 @@ const clampedTitle = (text, maxChars) =>
     text && String(text).length > maxChars ? text : null
 
 const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
+
+// ── Reading aids for a 16-column grid ───────────────────────────────────────────
+// Tracing a figure back to its month header across this many columns is the main
+// thing that makes wide financial tables tiring to read. Two cheap aids fix most
+// of it: a crosshair on the hovered column, and shading that lets the shape of a
+// year register without reading any numbers.
+
+// Delegated rather than 300 per-cell listeners.
+const hoveredMonth = ref(null)
+
+const onTableHover = (e) => {
+    const cell = e.target?.closest?.('[data-month-index]')
+    hoveredMonth.value = cell ? Number(cell.dataset.monthIndex) : null
+}
+
+// Each row is shaded against its OWN largest month, not a table-wide maximum.
+// A global scale would wash out every small account into a uniform pale band and
+// answer the wrong question — the useful one is "when did THIS account spend".
+const rowPeaks = computed(() =>
+    (props.rows?.data ?? []).map((row) =>
+        Math.max(...props.months.map((m) => Math.abs(Number(row[m.key]) || 0)), 0)
+    )
+)
+
+// Returned as a background-IMAGE so it layers over the column-hover
+// background-COLOR instead of replacing it — the two aids have to coexist.
+const heatStyle = (row, monthKey, rowIndex) => {
+    const value = Number(row[monthKey]) || 0
+    const peak = rowPeaks.value[rowIndex] || 0
+    if (!value || !peak) return null
+
+    const intensity = Math.abs(value) / peak
+    const alpha = (0.035 + intensity * 0.125).toFixed(3)
+    const rgb = value < 0 ? '220, 38, 38' : '217, 119, 6'
+
+    return { backgroundImage: `linear-gradient(rgba(${rgb}, ${alpha}), rgba(${rgb}, ${alpha}))` }
+}
 
 
 </script>
@@ -521,7 +559,7 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
             <!-- Loading overlay — financial coin spinner while a visit is in flight -->
             <transition name="overlay">
                 <div v-if="loading"
-                    class="absolute inset-0 z-30 grid place-items-center bg-surface/70 backdrop-blur-[2px]">
+                    class="absolute inset-0 z-40 grid place-items-center bg-surface/70 backdrop-blur-[2px]">
                     <div class="flex flex-col items-center gap-4">
                         <div class="coin" aria-hidden="true">
                             <div class="coin__face coin__front">$</div>
@@ -543,10 +581,11 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                 role="region"
                 aria-label="Monthly expenditure table, scrollable horizontally"
                 @mouseenter="pointerInTable = true"
-                @mouseleave="pointerInTable = false"
+                @mouseleave="pointerInTable = false; hoveredMonth = null"
                 @focusin="tableFocused = true"
                 @focusout="tableFocused = false">
-                <table class="ledger-table divide-y divide-line">
+                <table class="ledger-table divide-y divide-line"
+                    @mouseover="onTableHover">
                     <!-- Column widths live here, not on the cells. With
                          table-layout: fixed the browser treats these as
                          authoritative, which is what keeps the pinned columns'
@@ -561,7 +600,7 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                         <col class="w-ytd" />
                     </colgroup>
 
-                    <thead class="bg-surface-2">
+                    <thead>
                         <tr>
                             <th class="col-inst px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
                                 Institution
@@ -573,11 +612,13 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                                 Account
                             </th>
 
-                            <th v-for="m in months" :key="m.key"
+                            <th v-for="(m, i) in months" :key="m.key"
+                                :data-month-index="i"
                                 :class="[
                                     'col-month px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap',
-                                    m.quarterStart ? 'border-l border-line' : '',
-                                    m.future ? 'text-tx-muted/50' : 'text-tx-subtle',
+                                    m.quarterStart ? 'quarter-edge' : '',
+                                    hoveredMonth === i ? 'is-col-hover text-amber-700 dark:text-amber-300'
+                                        : m.future ? 'text-tx-muted/50' : 'text-tx-subtle',
                                 ]">
                                 {{ m.label }}
                                 <span class="block text-[9px] font-normal tabular-nums opacity-70">'{{ m.year }}</span>
@@ -605,7 +646,7 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                         </tr>
 
                         <!-- Data rows -->
-                        <tr v-for="(row, index) in rows.data" :key="index"
+                        <tr v-for="(row, rowIndex) in rows.data" :key="rowIndex"
                             class="group hover:bg-amber-50/40 dark:hover:bg-amber-900/10 transition-colors">
 
                             <td class="col-inst px-3 py-3 text-sm text-tx-body align-top">
@@ -633,10 +674,13 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                                 </div>
                             </td>
 
-                            <td v-for="m in months" :key="m.key"
+                            <td v-for="(m, i) in months" :key="m.key"
+                                :data-month-index="i"
+                                :style="heatStyle(row, m.key, rowIndex)"
                                 :class="[
                                     'col-month px-2.5 py-3 text-[13px] text-right whitespace-nowrap tabular-nums align-top',
-                                    m.quarterStart ? 'border-l border-line' : '',
+                                    m.quarterStart ? 'quarter-edge' : '',
+                                    hoveredMonth === i ? 'is-col-hover' : '',
                                     isZero(row[m.key])   ? 'text-tx-muted/40'
                                         : isNegative(row[m.key]) ? 'text-red-600 dark:text-red-400'
                                         : 'text-tx-body',
@@ -656,6 +700,41 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                         </tr>
 
                     </tbody>
+
+                    <!-- Totals across the ENTIRE filtered set, not this page. Said
+                         explicitly in the label, because a totals row sitting under
+                         25 visible rows otherwise reads as the sum of those rows. -->
+                    <tfoot v-if="rows.data.length">
+                        <tr>
+                            <td colspan="3" class="col-foot-label px-3 py-3 text-left align-middle">
+                                <span class="text-[11px] font-semibold uppercase tracking-wider text-tx-subtle">Totals</span>
+                                <span class="ml-2 text-[11px] text-tx-muted">
+                                    all {{ stats.accountCount }} account{{ stats.accountCount === 1 ? '' : 's' }}
+                                </span>
+                            </td>
+
+                            <td v-for="(m, i) in months" :key="m.key"
+                                :data-month-index="i"
+                                :class="[
+                                    'col-month px-2.5 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-semibold',
+                                    m.quarterStart ? 'quarter-edge' : '',
+                                    hoveredMonth === i ? 'is-col-hover' : '',
+                                    isZero(totals.months[m.key]) ? 'text-tx-muted/40'
+                                        : isNegative(totals.months[m.key]) ? 'text-red-600 dark:text-red-400'
+                                        : 'text-tx-primary',
+                                ]">
+                                <template v-if="isZero(totals.months[m.key])">–</template>
+                                <template v-else>{{ formatAmount(totals.months[m.key]) }}</template>
+                            </td>
+
+                            <td :class="[
+                                    'col-ytd px-3 py-3 text-sm text-right whitespace-nowrap font-bold tabular-nums',
+                                    isNegative(totals.ytd) ? 'text-red-600 dark:text-red-400' : 'text-tx-primary',
+                                ]">
+                                {{ formatAmount(totals.ytd) }}
+                            </td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
 
@@ -713,11 +792,56 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
     background-color: rgb(var(--color-surface));
 }
 
+/* ── Frozen header and totals row ────────────────────────────────────────────
+   The vertical scroll container is <main>, so `top`/`bottom` resolve against the
+   content area. Without this, the month headings scroll away after a handful of
+   rows and every figure below becomes an unlabelled number.
+
+   Layering matters: cells frozen on two axes must outrank cells frozen on one,
+   or the identity columns slide over the header as it scrolls.
+     30  header / footer corners (frozen vertically AND horizontally)
+     20  header / footer month cells (vertical only)
+     10  body identity + YTD columns (horizontal only) */
+thead th,
+tfoot td {
+    position: sticky;
+    z-index: 20;
+    background-color: rgb(var(--color-surface-2));
+}
+
+thead th { top: 0; }
+tfoot td { bottom: 0; }
+
 thead .col-inst,
 thead .col-dept,
 thead .col-acct,
-thead .col-ytd {
-    background-color: rgb(var(--color-surface-2));
+thead .col-ytd,
+tfoot .col-foot-label,
+tfoot .col-ytd {
+    z-index: 30;
+}
+
+/* Hairlines drawn as shadows so they ride along with the frozen rows rather than
+   scrolling off with the table's own borders. */
+thead th { box-shadow: inset 0 -1px 0 rgb(var(--color-line)); }
+tfoot td { box-shadow: inset 0 1px 0 rgb(var(--color-line)); }
+
+
+/* ── Column crosshair ────────────────────────────────────────────────────────
+   Applied as a background-COLOR so the per-cell heat shading, which is a
+   background-IMAGE, layers on top instead of being overwritten. Cyan against the
+   row's amber keeps the two axes readable where they cross. */
+.is-col-hover {
+    background-color: rgba(14, 165, 233, 0.09);
+}
+.dark .is-col-hover {
+    background-color: rgba(34, 211, 238, 0.1);
+}
+
+/* Quarter boundaries: a slightly stronger rule than the row hairlines, so the
+   twelve months read as four groups rather than one undifferentiated run. */
+.quarter-edge {
+    border-left: 1px solid rgb(var(--color-line));
 }
 
 /* Row hover must not reintroduce transparency. A translucent tint is layered as
@@ -789,6 +913,36 @@ tbody tr:hover .col-ytd {
         right: 0;
         z-index: 10;
         box-shadow: -8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+
+    /* The totals label spans the three identity columns, so it freezes as one
+       cell at left: 0 rather than needing offsets of its own. */
+    tfoot .col-foot-label {
+        left: 0;
+    }
+
+    /* Corner cells need BOTH the frozen-row hairline and the frozen-column depth
+       shadow. A single box-shadow declaration replaces rather than merges, so
+       they are combined explicitly here. */
+    thead .col-acct {
+        box-shadow:
+            inset 0 -1px 0 rgb(var(--color-line)),
+            8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+    thead .col-ytd {
+        box-shadow:
+            inset 0 -1px 0 rgb(var(--color-line)),
+            -8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+    tfoot .col-foot-label {
+        box-shadow:
+            inset 0 1px 0 rgb(var(--color-line)),
+            8px 0 10px -8px rgba(2, 6, 23, 0.28);
+    }
+    tfoot .col-ytd {
+        box-shadow:
+            inset 0 1px 0 rgb(var(--color-line)),
+            -8px 0 10px -8px rgba(2, 6, 23, 0.28);
     }
 }
 
