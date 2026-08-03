@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\ResolvesFiscalYear;
-use App\Concerns\SampleLedgerFixtures;
+use App\Concerns\VersionsLedgerCache;
+use App\Models\FinanceLedger;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -14,32 +17,39 @@ use Inertia\Response;
  * Allocation Line Expenditure — allocation against actual spend, per account
  * line, for a fiscal year.
  *
- * ─────────────────────────────────────────────────────────────────────────────
- * SCAFFOLD: every figure here is HARDCODED. Nothing touches SQL Server yet.
- * Replacing sampleRows() with a FinanceLedger query is the whole migration; the
- * prop contract does not change.
- * ─────────────────────────────────────────────────────────────────────────────
+ * Reads dbo.vw_FinanceLedger, which computes Excess and AllocationBalance
+ * against ActualExpenditure (YTD + Approved + Routing) rather than YTD alone —
+ * money that is committed on an approved or routing requisition is no longer
+ * available to spend, so counting only posted GL activity would overstate the
+ * headroom on every line that has an open commitment.
  */
 class AllocationLineExpenditureController extends Controller
 {
     use ResolvesFiscalYear;
-    use SampleLedgerFixtures;
+    use VersionsLedgerCache;
 
     /** Fiscal month columns in period order — PeriodID 1 = Oct … 12 = Sep. */
-    public const MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
+    public const MONTHS = FinanceLedger::MONTHS;
+
+    private const PER_PAGE = 25;
 
     public function index(Request $request): Response
     {
+        $username = $request->user()->username;
         $filters = $request->only('cluster', 'institution', 'department', 'description', 'account', 'fy');
-
-        $years = collect([2023, 2024, 2025, 2026]);
-
         $currentFiscalYear = $this->currentFiscalYear();
-        $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
-        $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
-        $filters['fy'] = $activeFiscalYear;
 
-        $rows = $this->sampleRows((int) $activeFiscalYear);
+        try {
+            $years = collect($this->availableYears($username));
+
+            $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
+            $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
+            $filters['fy'] = $activeFiscalYear;
+
+            $rows = $this->ledgerRows($username, (string) $activeFiscalYear);
+        } catch (\Throwable $e) {
+            return $this->unavailable($request, $filters, $currentFiscalYear, $e);
+        }
 
         // ── Filter option lists (scoped to what the active FY contains) ──────────
         $clusters = $rows->pluck('ClusterName')->filter()->unique()->sort()->values()->all();
@@ -127,20 +137,8 @@ class AllocationLineExpenditureController extends Controller
             'accountCount' => $filtered->count(),
         ];
 
-        // ── Paginate ─────────────────────────────────────────────────────────────
-        $perPage = 25;
-        $page = LengthAwarePaginator::resolveCurrentPage();
-
-        $paginated = new LengthAwarePaginator(
-            $filtered->forPage($page, $perPage)->values(),
-            $filtered->count(),
-            $perPage,
-            $page,
-            ['path' => $request->url(), 'query' => $request->query()],
-        );
-
         return Inertia::render('Expenditure/Allocation Line Expenditure', [
-            'rows' => $paginated,
+            'rows' => $this->paginate($request, $filtered),
             'clusters' => $clusters,
             'institutions' => $institutions,
             'departments' => $departments,
@@ -154,13 +152,130 @@ class AllocationLineExpenditureController extends Controller
             'activeFiscalYear' => $activeFiscalYear,
             'currentFiscalYear' => $currentFiscalYear,
             'fyNav' => $fyNav,
-            'isScaffold' => true,
         ]);
     }
 
     // =========================================================================
-    // Month headings
+    // Ledger reads
     // =========================================================================
+
+    /**
+     * Fiscal years this user has ledger rows for. Cached per user, versioned by
+     * the snapshot's refresh time so a rebuild invalidates it immediately.
+     *
+     * @return array<int,string>
+     */
+    private function availableYears(string $username): array
+    {
+        return Cache::store(config('ledger.cache.store'))->remember(
+            $this->ledgerCacheKey("finance-ledger:years:{$username}"),
+            config('ledger.cache.minutes') * 60,
+            fn () => FinanceLedger::forUser($username)
+                ->select('FinancialYear')
+                ->distinct()
+                ->orderBy('FinancialYear')
+                ->pluck('FinancialYear')
+                ->filter()
+                ->values()
+                ->all()
+        );
+    }
+
+    /**
+     * One row per account line for the year, as plain arrays.
+     *
+     * @return Collection<int,array<string,mixed>>
+     */
+    private function ledgerRows(string $username, string $fiscalYear): Collection
+    {
+        $columns = array_merge(
+            [
+                'FinancialYear', 'ClusterName', 'InstitutionName', 'Responsibility', 'DepartmentName',
+                'AccountNumber', 'AccountDescription', 'Allocation', 'Approved', 'Routing',
+                'YTDTotal', 'ActualExpenditure', 'Excess', 'AllocationBalance',
+            ],
+            self::MONTHS,
+        );
+
+        $numeric = array_merge(
+            ['Allocation', 'Approved', 'Routing', 'YTDTotal', 'ActualExpenditure', 'Excess', 'AllocationBalance'],
+            self::MONTHS,
+        );
+
+        return FinanceLedger::forUser($username)
+            ->forYear($fiscalYear)
+            ->select($columns)
+            ->orderBy('ClusterName')
+            ->orderBy('InstitutionName')
+            ->orderBy('DepartmentName')
+            ->orderBy('AccountNumber')
+            ->get()
+            ->map(function ($row) use ($columns, $numeric) {
+                $out = [];
+                foreach ($columns as $column) {
+                    $out[$column] = in_array($column, $numeric, true)
+                        ? (float) $row->{$column}
+                        : $row->{$column};
+                }
+
+                // The page shows one Encumbered column; the ledger splits the
+                // commitment into approved (AP + PO) and routing (RT + HD + PN).
+                $out['Encumbered'] = round($out['Approved'] + $out['Routing'], 2);
+
+                [$out['StatusKey'], $out['StatusAmount']] = $this->classify($out['Excess'], $out['AllocationBalance']);
+
+                return $out;
+            });
+    }
+
+    // =========================================================================
+    // Allocation outcome — the rule the page exists to show
+    // =========================================================================
+
+    /**
+     * Classify a line from the ledger's Excess / AllocationBalance pair.
+     *
+     * The view already floors the balance at zero and reports any overspend
+     * separately as Excess, so exactly one of the two can be non-zero. Doing
+     * the classification from those columns keeps the rule single-sourced in
+     * SQL rather than restating the arithmetic here.
+     *
+     * @return array{0:string,1:float}
+     */
+    private function classify(float $excess, float $balance): array
+    {
+        // Both sides are rounded money, but comparing floats for exact equality
+        // is still unsafe — half a cent of tolerance decides "fully spent".
+        if ($excess >= 0.005) {
+            return ['over', round($excess, 2)];
+        }
+
+        if ($balance >= 0.005) {
+            return ['under', round($balance, 2)];
+        }
+
+        return ['exact', 0.0];
+    }
+
+    // =========================================================================
+    // Presentation helpers
+    // =========================================================================
+
+    /**
+     * @param  Collection<int,array<string,mixed>>  $filtered
+     */
+    private function paginate(Request $request, Collection $filtered): LengthAwarePaginator
+    {
+        $page = LengthAwarePaginator::resolveCurrentPage();
+
+        return new LengthAwarePaginator(
+            $filtered->forPage($page, self::PER_PAGE)->values(),
+            $filtered->count(),
+            self::PER_PAGE,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()],
+        );
+    }
 
     /**
      * @return array<int,array{key:string,label:string,year:string,future:bool,quarterStart:bool}>
@@ -187,124 +302,54 @@ class AllocationLineExpenditureController extends Controller
         return $out;
     }
 
-    // =========================================================================
-    // Allocation outcome — the rule the page exists to show
-    // =========================================================================
-
     /**
-     * Classify a line's spend against its allocation.
-     *
-     * Balance floors at zero: once spending passes the allocation there is no
-     * such thing as a negative balance, the overspend is reported separately as
-     * the status amount. Returning a negative balance here would let it net off
-     * another line's headroom in the totals row and overstate available funds.
-     *
-     * Only the classification and the amounts are decided here. The wording is
-     * composed client-side, where the currency formatter already lives.
-     *
-     * @return array{balance:float, statusKey:string, statusAmount:float}
+     * SQL Server is unreachable — render an explicitly EMPTY page, never a
+     * zero-valued one. "TTD 0 allocated" during an outage is indistinguishable
+     * from a real answer; an empty table with a warning is not.
      */
-    private function allocationOutcome(float $allocation, float $ytd): array
+    private function unavailable(Request $request, array $filters, int $currentFiscalYear, \Throwable $e): Response
     {
-        $delta = round($ytd - $allocation, 2);
+        Log::error('Allocation line expenditure query failed.', [
+            'username' => $request->user()->username,
+            'fy' => $request->input('fy'),
+            'exception' => $e->getMessage(),
+        ]);
 
-        // Both sides are rounded to 2dp, but comparing floats for exact equality
-        // is still unsafe — half a cent of tolerance decides "fully spent".
-        if (abs($delta) < 0.005) {
-            return ['balance' => 0.0, 'statusKey' => 'exact', 'statusAmount' => 0.0];
-        }
+        session()->flash('warning', 'The financial data source is unavailable. Please try again later.');
 
-        if ($delta > 0) {
-            return ['balance' => 0.0, 'statusKey' => 'over', 'statusAmount' => $delta];
-        }
+        $filters['fy'] = $filters['fy'] ?? $currentFiscalYear;
 
-        return ['balance' => abs($delta), 'statusKey' => 'under', 'statusAmount' => abs($delta)];
-    }
-
-    // =========================================================================
-    // Hardcoded sample data — REPLACE WITH FinanceLedger QUERY
-    // =========================================================================
-
-    /**
-     * Deterministic sample rows. Values derive from a CRC of the account key,
-     * NOT from randomness, so figures stay identical across pagination and
-     * filter changes — a random source would make the table appear to change
-     * under the user.
-     *
-     * Allocations are seeded to produce all three status outcomes, so the page
-     * can be reviewed against every branch rather than only the common one.
-     */
-    private function sampleRows(int $fiscalYear): Collection
-    {
-        $cutoff = $this->resolveCutoff($fiscalYear);
-        $accounts = $this->sampleAccounts();
-        $rows = collect();
-
-        foreach ($this->sampleUnits() as [$cluster, $institution, $instId, $responsibility, $respId, $department, $deptId]) {
-            $take = 4 + (crc32($institution.$department) % 4);
-
-            foreach (array_slice($accounts, crc32($department) % 5, $take) as [$acctSeg, $acctDesc]) {
-                $accountNumber = $this->sampleAccountNumber($acctSeg, $instId, $respId, $deptId);
-
-                $row = [
-                    'FinancialYear' => (string) $fiscalYear,
-                    'ClusterName' => $cluster,
-                    'InstitutionName' => $institution,
-                    'Responsibility' => $responsibility,
-                    'DepartmentName' => $department,
-                    'AccountNumber' => $accountNumber,
-                    'AccountDescription' => $acctDesc,
-                ];
-
-                // ── Monthly spend; months past the cutoff have not happened ──
-                $ytd = 0.0;
-                foreach (self::MONTHS as $i => $month) {
-                    if ($i + 1 > $cutoff) {
-                        $row[$month] = 0.0;
-
-                        continue;
-                    }
-
-                    $seed = crc32($accountNumber.$month.$fiscalYear);
-                    $base = 4_000 + ($seed % 46_000);
-                    $value = round($seed % 23 === 0 ? -($base / 6) : $base, 2);
-
-                    $row[$month] = $value;
-                    $ytd += $value;
-                }
-
-                $ytd = round($ytd, 2);
-                $allocSeed = crc32($accountNumber.'allocation'.$fiscalYear);
-
-                if ($ytd <= 0) {
-                    // A future or not-yet-started year: budgeted, nothing spent.
-                    $allocation = round(50_000 + ($allocSeed % 400_000), 2);
-                } elseif ($allocSeed % 9 === 0) {
-                    $allocation = $ytd;                                        // exactly consumed
-                } elseif ($allocSeed % 5 === 0) {
-                    $allocation = round($ytd * 0.82, 2);                       // overspent
-                } else {
-                    $allocation = round($ytd * (1.15 + ($allocSeed % 40) / 100), 2);
-                }
-
-                $outcome = $this->allocationOutcome($allocation, $ytd);
-
-                $row['Allocation'] = $allocation;
-                $row['Encumbered'] = round(($allocSeed % 7 === 0) ? 0.0 : ($allocSeed % 28_000), 2);
-                $row['YTDTotal'] = $ytd;
-                $row['AllocationBalance'] = $outcome['balance'];
-                $row['StatusKey'] = $outcome['statusKey'];
-                $row['StatusAmount'] = $outcome['statusAmount'];
-
-                $rows->push($row);
-            }
-        }
-
-        return $rows->sortBy([
-            ['ClusterName', 'asc'],
-            ['InstitutionName', 'asc'],
-            ['DepartmentName', 'asc'],
-            ['AccountNumber', 'asc'],
-        ])->values();
+        return Inertia::render('Expenditure/Allocation Line Expenditure', [
+            'rows' => new LengthAwarePaginator([], 0, self::PER_PAGE, 1, [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]),
+            'clusters' => [],
+            'institutions' => [],
+            'departments' => [],
+            'descriptions' => [],
+            'accounts' => [],
+            'years' => [],
+            'months' => $this->monthHeadings((int) $filters['fy']),
+            'stats' => [
+                'totalAllocation' => 0,
+                'totalExpenditure' => 0,
+                'balance' => 0,
+                'exceededCount' => 0,
+                'accountCount' => 0,
+            ],
+            'totals' => [
+                'allocation' => 0,
+                'months' => array_fill_keys(self::MONTHS, 0),
+                'encumbered' => 0,
+                'ytd' => 0,
+                'balance' => 0,
+                'exceededCount' => 0,
+            ],
+            'filters' => $filters,
+            'activeFiscalYear' => $filters['fy'],
+            'currentFiscalYear' => $currentFiscalYear,
+            'fyNav' => ['prev' => null, 'next' => null],
+        ]);
     }
 }

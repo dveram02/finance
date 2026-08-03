@@ -321,7 +321,9 @@ const categoryBarOptions = computed(() => ({
           <div class="flex items-start justify-between mb-3">
             <div>
               <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Budget</p>
-              <p class="text-[10px] text-tx-subtle mt-0.5">Approved allocation</p>
+              <!-- Goods and services only — vw_BudgetAllocation is scoped to the 41
+                   reporting-line accounts, so payroll is excluded from this figure. -->
+              <p class="text-[10px] text-tx-subtle mt-0.5">Approved allocation, goods and services</p>
             </div>
             <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(20,184,166,0.1);">
               <i class="fas fa-chart-pie text-sm" style="color: #0d9488;"></i>

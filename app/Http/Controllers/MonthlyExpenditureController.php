@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\VersionsLedgerCache;
 use App\Models\MonthlyExpenditure;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -14,6 +15,7 @@ use Inertia\Response;
 class MonthlyExpenditureController extends Controller
 {
     use ResolvesFiscalYear;
+    use VersionsLedgerCache;
 
     public function index(Request $request): Response
     {
@@ -30,7 +32,7 @@ class MonthlyExpenditureController extends Controller
         try {
             // ── Available fiscal years (all years — drives the FY navigator) ──
             $years = collect($cache->remember(
-                "monthly-expenditure:years:{$username}",
+                $this->ledgerCacheKey("monthly-expenditure:years:{$username}"),
                 $cacheTtl,
                 fn () => $base()
                     ->select('FinancialYear')
@@ -62,7 +64,7 @@ class MonthlyExpenditureController extends Controller
             };
 
             $options = $cache->remember(
-                "monthly-expenditure:options:{$username}:{$activeFiscalYear}",
+                $this->ledgerCacheKey("monthly-expenditure:options:{$username}:{$activeFiscalYear}"),
                 $cacheTtl,
                 fn () => [
                     'clusters' => $fyBase()

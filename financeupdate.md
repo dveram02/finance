@@ -3,40 +3,74 @@
 Plan for adopting `SQL Revised Web App.sql` as the single source for Monthly Expenditure,
 Budget Allocations, the Dashboard, and the new views.
 
-**Status: revision 4 — awaiting review. Nothing has been implemented.**
-
-Revision 4 is a restructure, not another patch. Revisions 1–3 accumulated corrections on top of
-corrections and became hard to execute from; the build spec is now separated from the reasoning,
-which lives in the **Findings log** at the end.
+> ## ✅ Status: IMPLEMENTED on the replica, 2026-08-02. Not yet on production.
+>
+> This document is now the **design rationale**, not the state of the world. What was actually
+> built, measured and decided is recorded in **`financeupdateprogress.md`**; the step-by-step
+> production rollout is in **`instructions.md`**. Read those first.
+>
+> Revision 4's build spec was executed essentially as written. The material differences:
+>
+> - **Phase 0 was unnecessary** — both live views had already been repointed on 2026-07-31.
+>   `sql/00_HotfixReportingTableNames.sql` was never written. See the struck-through section below.
+> - **All five open questions are resolved** — see [Open questions](#open-questions).
+> - **Phase 3's deferred views were not built.** The two scaffolded pages (Department
+>   Expenditure, Allocation Line Expenditure) were migrated onto the ledger instead; the
+>   remaining deferred views are still deferred.
+> - **One behaviour change beyond the spec**: allocation balance and overspend now measure
+>   against `ActualExpenditure` (YTD + Approved + Routing), not YTD alone.
+>
+> Every measurement below is superseded. The replica was refreshed from production before
+> implementation, which invalidated most of the dev figures; `financeupdateprogress.md` carries
+> the re-measured set.
 
 ---
 
-## 🔴 Production may be serving no data right now — check this first
+## ~~🔴 Production may be serving no data right now — check this first~~ — RESOLVED, was not happening
 
 The naming question is resolved: **`SQL Revised Web App.sql` reflects production, and dev is
 stale.** So `0030AACOAReports` / `0030ABCOAReportlines` / `0030ACCOAReportAccounts` are the
 canonical names and the script is correct as written. No change needed to its table references.
 
-But that resolution has an uncomfortable implication. The saved definitions of **both live views**
-— `dbo.MonthlyExpenditure` and `dbo.vw_BudgetAllocation` — reference the *old* names
-`0030ACOAReports` / `0030BCOAReportlines` / `0030CCOAReportAccounts`. If production renamed those
-tables and nobody repointed the views, **production is failing right now**:
+That much held. The alarm that followed did **not**:
+
+> **Resolved 2026-08-02.** The refreshed replica has the canonical `0030AA*` tables **and both
+> views were already repointed on 2026-07-31** (`sys.views.modify_date`). Both executed
+> successfully before any of this work began. There was no outage and Phase 0 was a no-op.
+>
+> The real defect was different and invisible from the naming angle: `dbo.MonthlyExpenditure`
+> had **no fiscal-year pushdown**, so every call materialised all users × 13 fiscal years —
+> **70 seconds for `TOP 3`**. That is what the snapshot fixes.
+
+The original reasoning is kept below for the record.
+
+~~But that resolution has an uncomfortable implication. The saved definitions of **both live views**~~
+~~— `dbo.MonthlyExpenditure` and `dbo.vw_BudgetAllocation` — reference the *old* names~~
+~~`0030ACOAReports` / `0030BCOAReportlines` / `0030CCOAReportAccounts`. If production renamed those~~
+~~tables and nobody repointed the views, **production is failing right now**:~~
 
 ```
 Invalid object name 'FinanceAutomationSystem.dbo.0030ACOAReports'
 ```
 
-Because every controller wraps its queries in try/catch and degrades to an *unavailable* state,
-this would surface to users as "The financial data source is unavailable" rather than an error —
-which would explain what prompted this work in the first place.
+~~Because every controller wraps its queries in try/catch and degrades to an *unavailable* state,~~
+~~this would surface to users as "The financial data source is unavailable" rather than an error —~~
+~~which would explain what prompted this work in the first place.~~
 
-I cannot confirm it from here: dev is stale in the opposite direction, so on dev the old tables
-exist and the views execute fine. **Run `sql/00_PreflightChecks.sql` CHECK 1 and CHECK 2 against
-production** — that settles it in seconds. If the views fail, Phase 0 is urgent, not conditional.
+~~I cannot confirm it from here: dev is stale in the opposite direction, so on dev the old tables~~
+~~exist and the views execute fine.~~ **Run `sql/00_PreflightChecks.sql` CHECK 1 and CHECK 2 against
+production** — that still applies as a pre-rollout check, and is step 1 of `instructions.md`.
 
 ---
 
 ## Every measurement in this document is from a stale dev box
+
+⚠ **Superseded.** Re-measured against the refreshed replica on 2026-08-02 — see
+`financeupdateprogress.md`, "Re-measurement". Figures that changed materially: `max server memory`
+500 MB → 2048 MB, the full script >6 min → 10.3s, `dbo.MonthlyExpenditure` ~10s → 70s for `TOP 3`,
+and `VIEW DEFINITION` permission denied → granted. Figures that did **not** change: the 6.38M-row
+`0098AFinGLMaster` with no index on `FinancialYear`, the 1,117 allocation-only accounts holding
+TTD 21,128,414.88, the 41 clean `varianceLines`, and the 3-row user-access set.
 
 The SQL Server I measured against (`10.5.12.3\SQLEXPRESS`) is **test/dev, and behind production**.
 Nothing below should drive a decision until re-taken on production. `sql/00_PreflightChecks.sql` is
@@ -78,17 +112,25 @@ reason I could not see. CHECK 2 decides it.
 The heavy query moves off the request path into a local indexed snapshot, refreshed on a schedule.
 The app reads thin views over that snapshot through its existing read-only Eloquent models.
 
-| Object | Kind | Purpose |
-|---|---|---|
-| `dbo.fn_FinanceLedgerSource(@FinancialYear)` | iTVF | The corrected script, fiscal year as a **required** parameter |
-| `dbo.FinanceLedgerSnapshot` (+ `_Staging`) | Table | Local indexed materialisation |
-| `dbo.FinanceLedgerRefresh` | Table | One-row freshness + refresh-outcome metadata |
-| `dbo.vw_WebAppUserAccess` | View (live) | `DISTINCT (UserName, ResponsibilityID, DepartmentID)` |
-| `dbo.vw_FinanceLedger` | View | The app's read surface |
-| `dbo.MonthlyExpenditure` | View (redefined) | `UNPIVOT` back to per-period rows |
-| `dbo.vw_BudgetAllocation` | View (redefined) | Projection with `Allocation AS TotalAllocation` |
-| `dbo.usp_RefreshFinanceLedgerSnapshot` | Proc | One fiscal year, with sanity gates |
-| `dbo.usp_RefreshFinanceLedgerSnapshotAll` | Proc | Loops the years |
+All of the below were built as specified. `sql/FinanceLedger.sql` carries the objects;
+`sql/FinanceLedgerCutover.sql` carries the two view redefinitions.
+
+| Object | Kind | Purpose | File |
+|---|---|---|---|
+| `dbo.fn_FinanceLedgerSource(@FinancialYear)` | iTVF | The corrected script, fiscal year as a **required** parameter | `FinanceLedger.sql` |
+| `dbo.FinanceLedgerSnapshot` (+ `_Staging`) | Table | Local indexed materialisation | `FinanceLedger.sql` |
+| `dbo.FinanceLedgerRefresh` | Table | Freshness + refresh-outcome metadata, **one row per fiscal year** | `FinanceLedger.sql` |
+| `dbo.vw_WebAppUserAccess` | View (live) | `DISTINCT (UserName, ResponsibilityID, DepartmentID)` | `FinanceLedger.sql` |
+| `dbo.vw_FinanceLedger` | View | The app's read surface | `FinanceLedger.sql` |
+| `dbo.MonthlyExpenditure` | View (redefined) | `UNPIVOT` back to per-period rows | `FinanceLedgerCutover.sql` |
+| `dbo.vw_BudgetAllocation` | View (redefined) | Projection with `Allocation AS TotalAllocation` | `FinanceLedgerCutover.sql` |
+| `dbo.usp_RefreshFinanceLedgerSnapshot` | Proc | One fiscal year, with sanity gates | `FinanceLedger.sql` |
+| `dbo.usp_RefreshFinanceLedgerSnapshotAll` | Proc | Loops the years | `FinanceLedger.sql` |
+
+Two refinements made during the build, neither changing the shape above: `FinanceLedgerRefresh`
+holds one row **per fiscal year** rather than one row overall (so a single bad year is visible
+and does not overwrite the others' figures), and `vw_BudgetAllocation` filters `Allocation <> 0`
+so a *budget* page does not list the GL/encumbrance-only accounts the ledger now carries.
 
 App side: one new model, one new page, one shared cache-versioning trait. The two redefined views
 keep their existing names, so `App\Models\MonthlyExpenditure` and `App\Models\BudgetAllocation`
@@ -112,25 +154,31 @@ driven by a proc.
 
 ## Open questions
 
-**Resolved:** the naming scheme. `0030AA*` is canonical; the script is correct as written.
+**All resolved as of 2026-08-02.** The naming scheme was already settled: `0030AA*` is canonical
+and the script is correct as written.
 
-Remaining, in priority order:
+| # | Question | Resolution |
+|---|---|---|
+| 1 | Do the two live views execute? | **Yes.** Already repointed 2026-07-31. Phase 0 was a no-op. Still worth re-checking on production as step 1 of `instructions.md`. |
+| 2 | What edition is production? | **Still unknown — but no longer blocking.** The refresh is scheduled from **Laravel**, not SQL Agent, so an Express production works either way. A 10 GB Express cap would still matter. |
+| 3 | When does the GL load finish? | **Still unknown.** The nightly refresh is parked at 02:00 with a `TODO` in `routes/console.php`; move it once the window is known. |
+| 4 | Is the `AccountDescription` change acceptable? | **Accepted, with a fallback.** Descriptions come from `0098AFinGLMaster`, falling back to the segment-2 name for accounts with no GL activity — which is what the legacy view used for *every* row, so allocation-only accounts keep a sensible label. |
+| 5 | Are the `UNDEFINED` segment names acceptable? | **No — fixed rather than accepted.** Names come from `0000CSegmentControls.RevisedDescription`, falling back to `GL40200.DSCRIPTN` when NULL, blank or `REMOVE`, and only then to `UNDEFINED`. |
 
-1. **Do the two live views execute on production?** Run CHECK 1 + CHECK 2. If not, Phase 0 is an
-   immediate fix, not a conditional one.
-2. **What edition is production?** Determines SQL Agent vs Laravel scheduler. CHECK 0.
-3. **When does the GL load populating `0098AFinGLMaster` finish?** Sets the schedule.
-4. **Is the `AccountDescription` change acceptable on the Budget page?** The live
-   `vw_BudgetAllocation` sources it from `GL40200` segment 2; the new script uses
-   `0098AFinGLMaster.AccountDescription`. Migrating unifies the two pages but changes visible text.
-5. **Are the `UNDEFINED` segment names acceptable?** The new script takes names from
-   `0000CSegmentControls.RevisedDescription` rather than `GL40200.DSCRIPTN`. 5 of 150 departments,
-   2 of 29 responsibilities and 1 of 54 institutions are marked `REMOVE` and will render as
-   `UNDEFINED`, plus one department with no control row.
+Question 3 is the only one that still needs an answer before the rollout is fully finished.
 
 ---
 
-## Phase 0 — restore the live views (likely urgent on production)
+## ~~Phase 0 — restore the live views (likely urgent on production)~~ — NOT NEEDED
+
+> **Resolved 2026-08-02.** Gated on CHECK 2, as written below — and the gate came back negative.
+> Both views already execute; they had been repointed to `0030AA*` on 2026-07-31.
+> `sql/00_HotfixReportingTableNames.sql` was never written and is not needed.
+>
+> The second purpose still held: the legacy views were used as the reconciliation baseline for
+> Phase 1, and they are retained as `MonthlyExpenditure_Legacy` / `vw_BudgetAllocation_Legacy`
+> after cutover.
+
 
 `CREATE OR ALTER` both views with **only** the three table references corrected to the canonical
 `0030AA*` names — no other change. Written to `sql/00_HotfixReportingTableNames.sql` with both full
@@ -443,9 +491,17 @@ Found while verifying the reviews, not raised by them: encumbrance-only accounts
 
 All read from `vw_FinanceLedger`; no further SQL objects needed.
 
-| View | Source columns |
-|---|---|
-| Year to Date Expenditure | `YTDTotal`, `ActualExpenditure` |
-| Allocation per Line Expenditure | `Allocation`, spend, `AllocationBalance` per account / reporting line |
-| Encumbered Expenditure | `Approved` (AP + PO) |
-| Routing Expenditure | `Routing` (RT + HD + PN) |
+| View | Source columns | Status |
+|---|---|---|
+| Year to Date Expenditure | `YTDTotal`, `ActualExpenditure` | Deferred |
+| Allocation per Line Expenditure | `Allocation`, spend, `AllocationBalance` per account / reporting line | **Built** — `/allocation-line-expenditure` |
+| Encumbered Expenditure | `Approved` (AP + PO) | Deferred |
+| Routing Expenditure | `Routing` (RT + HD + PN) | Deferred |
+
+Also built, and not anticipated in this table: **Department Expenditure**
+(`/department-expenditure`) — one row per account with the 12 fiscal months across. It is the
+"Annual Expenditure page" from Phase 2 under a different name.
+
+The three deferred views need no new SQL. Every column they require is already on
+`vw_FinanceLedger`; each is a controller plus a Vue page following
+`DepartmentExpenditureController` exactly.

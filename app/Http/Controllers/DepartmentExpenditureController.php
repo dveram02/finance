@@ -3,44 +3,53 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\VersionsLedgerCache;
+use App\Models\FinanceLedger;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Annual expenditure report — one row per account for a fiscal year, with the
- * 12 fiscal months across and a YTD total.
+ * Department expenditure — one row per account for a fiscal year, with the 12
+ * fiscal months across and a YTD total.
  *
- * ─────────────────────────────────────────────────────────────────────────────
- * SCAFFOLD: every figure here is HARDCODED. Nothing touches SQL Server yet.
- *
- * The shape is deliberately identical to what dbo.vw_FinanceLedger will return
- * (see financeupdate.php plan), so going live means replacing sampleRows() with
- * a FinanceLedger query and deleting the in-memory filtering below. The prop
- * contract passed to the page does not change.
- * ─────────────────────────────────────────────────────────────────────────────
+ * Reads dbo.vw_FinanceLedger, which already carries the months pivoted, so the
+ * page needs one query per request. The per-user set is small (the ledger is
+ * scoped to the departments a user's positions grant), so the filter option
+ * lists, stats and pagination are all derived in memory from that one result —
+ * the same shape BudgetAllocationController uses.
  */
 class DepartmentExpenditureController extends Controller
 {
     use ResolvesFiscalYear;
+    use VersionsLedgerCache;
 
     /** Fiscal month columns in period order — PeriodID 1 = Oct … 12 = Sep. */
-    public const MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
+    public const MONTHS = FinanceLedger::MONTHS;
+
+    private const PER_PAGE = 25;
 
     public function index(Request $request): Response
     {
+        $username = $request->user()->username;
         $filters = $request->only('cluster', 'institution', 'responsibility', 'department', 'fy');
-
-        $years = collect([2023, 2024, 2025, 2026]);
-
         $currentFiscalYear = $this->currentFiscalYear();
-        $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
-        $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
-        $filters['fy'] = $activeFiscalYear;
 
-        $rows = $this->sampleRows((int) $activeFiscalYear);
+        try {
+            $years = collect($this->availableYears($username));
+
+            $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
+            $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
+            $filters['fy'] = $activeFiscalYear;
+
+            $rows = $this->ledgerRows($username, (string) $activeFiscalYear);
+        } catch (\Throwable $e) {
+            return $this->unavailable($request, $filters, $currentFiscalYear, $e);
+        }
 
         // ── Filter option lists (scoped to what the active FY actually contains) ──
         $clusters = $rows->pluck('ClusterName')->filter()->unique()->sort()->values()->all();
@@ -115,20 +124,8 @@ class DepartmentExpenditureController extends Controller
             'ytd' => $grandTotal,
         ];
 
-        // ── Paginate ─────────────────────────────────────────────────────────────
-        $perPage = 25;
-        $page = LengthAwarePaginator::resolveCurrentPage();
-
-        $paginated = new LengthAwarePaginator(
-            $filtered->forPage($page, $perPage)->values(),
-            $filtered->count(),
-            $perPage,
-            $page,
-            ['path' => $request->url(), 'query' => $request->query()],
-        );
-
         return Inertia::render('Expenditure/Department Expenditure', [
-            'rows' => $paginated,
+            'rows' => $this->paginate($request, $filtered),
             'clusters' => $clusters,
             'institutions' => $institutions,
             'responsibilities' => $responsibilities,
@@ -141,13 +138,89 @@ class DepartmentExpenditureController extends Controller
             'activeFiscalYear' => $activeFiscalYear,
             'currentFiscalYear' => $currentFiscalYear,
             'fyNav' => $fyNav,
-            'isScaffold' => true,
         ]);
     }
 
     // =========================================================================
-    // Month headings
+    // Ledger reads
     // =========================================================================
+
+    /**
+     * Fiscal years this user has ledger rows for. Cached per user, versioned by
+     * the snapshot's refresh time so a rebuild invalidates it immediately.
+     *
+     * @return array<int,string>
+     */
+    private function availableYears(string $username): array
+    {
+        return Cache::store(config('ledger.cache.store'))->remember(
+            $this->ledgerCacheKey("finance-ledger:years:{$username}"),
+            config('ledger.cache.minutes') * 60,
+            fn () => FinanceLedger::forUser($username)
+                ->select('FinancialYear')
+                ->distinct()
+                ->orderBy('FinancialYear')
+                ->pluck('FinancialYear')
+                ->filter()
+                ->values()
+                ->all()
+        );
+    }
+
+    /**
+     * One row per account for the year, as plain arrays.
+     *
+     * Not cached: the table and its stats stay live, matching the other data
+     * pages. Only the derived option lists are cached.
+     *
+     * @return Collection<int,array<string,mixed>>
+     */
+    private function ledgerRows(string $username, string $fiscalYear): Collection
+    {
+        $columns = array_merge(
+            ['FinancialYear', 'ClusterName', 'InstitutionName', 'Responsibility', 'DepartmentName', 'AccountNumber', 'AccountDescription', 'YTDTotal'],
+            self::MONTHS,
+        );
+
+        return FinanceLedger::forUser($username)
+            ->forYear($fiscalYear)
+            ->select($columns)
+            ->orderBy('ClusterName')
+            ->orderBy('InstitutionName')
+            ->orderBy('DepartmentName')
+            ->orderBy('AccountNumber')
+            ->get()
+            ->map(function ($row) use ($columns) {
+                $out = [];
+                foreach ($columns as $column) {
+                    $out[$column] = in_array($column, self::MONTHS, true) || $column === 'YTDTotal'
+                        ? (float) $row->{$column}
+                        : $row->{$column};
+                }
+
+                return $out;
+            });
+    }
+
+    // =========================================================================
+    // Presentation helpers
+    // =========================================================================
+
+    /**
+     * @param  Collection<int,array<string,mixed>>  $filtered
+     */
+    private function paginate(Request $request, Collection $filtered): LengthAwarePaginator
+    {
+        $page = LengthAwarePaginator::resolveCurrentPage();
+
+        return new LengthAwarePaginator(
+            $filtered->forPage($page, self::PER_PAGE)->values(),
+            $filtered->count(),
+            self::PER_PAGE,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()],
+        );
+    }
 
     /**
      * Column headings for the 12 fiscal months, e.g. ['key' => 'Oct',
@@ -185,104 +258,47 @@ class DepartmentExpenditureController extends Controller
         return $this->fiscalMonthLabels($fiscalYear)[$periodId] ?? strtoupper($key);
     }
 
-    // =========================================================================
-    // Hardcoded sample data — REPLACE WITH FinanceLedger QUERY
-    // =========================================================================
-
     /**
-     * Deterministic sample rows for a fiscal year.
-     *
-     * Values are derived from a CRC of the account key, NOT random, so figures
-     * stay identical across pagination and filter changes — a random source
-     * would make the table appear to change under the user.
-     *
-     * Months after the fiscal-year cutoff are zero, matching how a real
-     * in-progress year looks (see ResolvesFiscalYear::resolveCutoff).
+     * SQL Server is unreachable — render an explicitly EMPTY page, never a
+     * zero-valued one. A dashboard reading "TTD 0 spent" during an outage is
+     * indistinguishable from a real answer; an empty table with a warning is not.
      */
-    private function sampleRows(int $fiscalYear): Collection
+    private function unavailable(Request $request, array $filters, int $currentFiscalYear, \Throwable $e): Response
     {
-        $cutoff = $this->resolveCutoff($fiscalYear);
+        Log::error('Department expenditure query failed.', [
+            'username' => $request->user()->username,
+            'fy' => $request->input('fy'),
+            'exception' => $e->getMessage(),
+        ]);
 
-        $accounts = [
-            ['80400', 'MEDICAL SUPPLIES AND DRUGS'],
-            ['80410', 'PHARMACEUTICALS'],
-            ['80500', 'SURGICAL SUNDRIES'],
-            ['81200', 'LABORATORY REAGENTS'],
-            ['82100', 'OFFICE SUPPLIES AND STATIONERY'],
-            ['83000', 'REPAIRS AND MAINTENANCE - BUILDING'],
-            ['83100', 'REPAIRS AND MAINTENANCE - EQUIPMENT'],
-            ['84200', 'ELECTRICITY'],
-            ['84300', 'WATER AND SEWERAGE'],
-            ['85100', 'CONTRACT CLEANING SERVICES'],
-            ['86200', 'SECURITY SERVICES'],
-            ['87400', 'TRAVELLING AND SUBSISTENCE'],
-        ];
+        session()->flash('warning', 'The financial data source is unavailable. Please try again later.');
 
-        $units = [
-            ['SOUTH WEST', 'SAN FERNANDO GENERAL HOSPITAL', 'H01', 'MEDICAL SERVICES', '107', 'PHARMACY', '1157'],
-            ['SOUTH WEST', 'SAN FERNANDO GENERAL HOSPITAL', 'H01', 'MEDICAL SERVICES', '107', 'RADIOLOGY', '1162'],
-            ['SOUTH WEST', 'SAN FERNANDO GENERAL HOSPITAL', 'H01', 'NURSING SERVICES', '112', 'ACCIDENT AND EMERGENCY', '1204'],
-            ['SOUTH WEST', 'POINT FORTIN AREA HOSPITAL', 'H04', 'MEDICAL SERVICES', '107', 'PHARMACY', '1158'],
-            ['SOUTH WEST', 'POINT FORTIN AREA HOSPITAL', 'H04', 'SUPPORT SERVICES', '131', 'FACILITIES MAINTENANCE', '1442'],
-            ['CENTRAL', 'PRINCES TOWN DISTRICT HEALTH FACILITY', 'H07', 'NURSING SERVICES', '112', 'OUTPATIENT CLINIC', '1219'],
-            ['CENTRAL', 'COUVA DISTRICT HEALTH FACILITY', 'H09', 'SUPPORT SERVICES', '131', 'FACILITIES MAINTENANCE', '1447'],
-            ['SOUTH EAST', 'SIPARIA DISTRICT HEALTH FACILITY', 'H12', 'ADMINISTRATION', '145', 'CORPORATE SERVICES', '1503'],
-            ['SOUTH EAST', 'RIO CLARO DISTRICT HEALTH FACILITY', 'H14', 'NURSING SERVICES', '112', 'OUTPATIENT CLINIC', '1221'],
-        ];
+        $filters['fy'] = $filters['fy'] ?? $currentFiscalYear;
 
-        $rows = collect();
-
-        foreach ($units as $u) {
-            [$cluster, $institution, $instId, $responsibility, $respId, $department, $deptId] = $u;
-
-            // A deterministic slice of the account list per unit, so the report is
-            // varied without every department carrying every account.
-            $take = 4 + (crc32($institution.$department) % 4);
-
-            foreach (array_slice($accounts, crc32($department) % 5, $take) as [$acctSeg, $acctDesc]) {
-                $accountNumber = "4-{$acctSeg}-{$instId}-{$respId}-{$deptId}-00-000";
-
-                $row = [
-                    'FinancialYear' => (string) $fiscalYear,
-                    'ClusterName' => $cluster,
-                    'InstitutionName' => $institution,
-                    'Responsibility' => $responsibility,
-                    'DepartmentName' => $department,
-                    'AccountNumber' => $accountNumber,
-                    'AccountDescription' => $acctDesc,
-                ];
-
-                $ytd = 0.0;
-                foreach (self::MONTHS as $i => $month) {
-                    $periodId = $i + 1;
-
-                    if ($periodId > $cutoff) {
-                        $row[$month] = 0.0;
-
-                        continue;
-                    }
-
-                    $seed = crc32($accountNumber.$month.$fiscalYear);
-                    $base = 4_000 + ($seed % 46_000);
-
-                    // A small deterministic minority of months are credit
-                    // corrections, so negative-value rendering is exercised.
-                    $value = round($seed % 23 === 0 ? -($base / 6) : $base, 2);
-
-                    $row[$month] = $value;
-                    $ytd += $value;
-                }
-
-                $row['YTDTotal'] = round($ytd, 2);
-                $rows->push($row);
-            }
-        }
-
-        return $rows->sortBy([
-            ['ClusterName', 'asc'],
-            ['InstitutionName', 'asc'],
-            ['DepartmentName', 'asc'],
-            ['AccountNumber', 'asc'],
-        ])->values();
+        return Inertia::render('Expenditure/Department Expenditure', [
+            'rows' => new LengthAwarePaginator([], 0, self::PER_PAGE, 1, [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]),
+            'clusters' => [],
+            'institutions' => [],
+            'responsibilities' => [],
+            'departments' => [],
+            'years' => [],
+            'months' => $this->monthHeadings((int) $filters['fy']),
+            'stats' => [
+                'totalExpenditure' => 0,
+                'highestMonth' => ['label' => null, 'amount' => 0],
+                'accountCount' => 0,
+            ],
+            'totals' => [
+                'months' => array_fill_keys(self::MONTHS, 0),
+                'ytd' => 0,
+            ],
+            'filters' => $filters,
+            'activeFiscalYear' => $filters['fy'],
+            'currentFiscalYear' => $currentFiscalYear,
+            'fyNav' => ['prev' => null, 'next' => null],
+        ]);
     }
 }

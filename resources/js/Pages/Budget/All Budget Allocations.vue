@@ -172,7 +172,13 @@ const formatNumber = (value) =>
         <div class="text-center">
             <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">Budget Allocations</h1>
             <p class="text-sm text-tx-subtle mt-1">
-                A fiscal-year ledger of your approved budget allocations.
+                A fiscal-year ledger of your approved goods-and-services budget allocations.
+            </p>
+            <!-- The source view is restricted to the 41 reporting-line accounts, which
+                 exclude salaries, overtime and benefits. Without saying so, the total
+                 reads as a full departmental budget and is short by an order of magnitude. -->
+            <p class="text-xs text-tx-subtle/80 mt-1">
+                Payroll allocations (salaries, overtime, benefits) are not reported here.
             </p>
         </div>
 
@@ -315,7 +321,7 @@ const formatNumber = (value) =>
                     <div class="flex items-start justify-between mb-3">
                         <div>
                             <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Allocation</p>
-                            <p class="text-[10px] text-tx-subtle mt-0.5">Across all filtered results</p>
+                            <p class="text-[10px] text-tx-subtle mt-0.5">Goods and services, across all filtered results</p>
                         </div>
                         <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(217,119,6,0.1);">
                             <i class="fas fa-coins text-sm" style="color: #d97706;"></i>

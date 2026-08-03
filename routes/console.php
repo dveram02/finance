@@ -8,28 +8,25 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Generate draft requisitions 7 days before each scheduled delivery date
-Schedule::command('requisitions:generate-scheduled-drafts')
-    ->dailyAt('00:00')  // 00:00 for 12am
-    ->withoutOverlapping()
-    ->runInBackground();
+// =============================================================================
+// Finance ledger snapshot
+// =============================================================================
+// Scheduled from Laravel rather than SQL Agent, because production's SQL Server
+// edition is unconfirmed and Express has no Agent.
+//
+// Closed fiscal years never change, so the current and prior FY refresh nightly
+// while the full 13-year loop runs weekly. withoutOverlapping() matters: a year
+// takes 90-110 seconds to build, so a slow night must not stack runs.
+//
+// TODO: move the nightly run to just after the GL load that populates
+// 0098AFinGLMaster finishes — that window is not yet confirmed.
 
-// Notify HOD and clerks when a scheduled draft hasn't been submitted 3 days before delivery
-Schedule::command('requisitions:notify-overdue-scheduled')
-    ->dailyAt('01:00')
-    ->withoutOverlapping()
-    ->runInBackground();
-
-// Sync reason_code + reason_description from GP vw_ReasonCodeInventoryAccounts
-Schedule::command('gp:sync-reason-codes')
+Schedule::command('ledger:refresh')
     ->dailyAt('02:00')
-    ->withoutOverlapping()
-    ->runInBackground();
+    ->withoutOverlapping(config('ledger.refresh.timeout_seconds') / 60)
+    ->onFailure(fn () => logger()->error('Scheduled finance ledger refresh failed.'));
 
-// Prune stale audit log entries (retention policy defined on AuditEntry + ActivityEntry models)
-Schedule::command('model:prune', [
-    '--model' => [
-        \App\Models\Audit\AuditEntry::class,
-        \App\Models\Audit\ActivityEntry::class,
-    ],
-])->weekly()->sundays()->at('03:00');
+Schedule::command('ledger:refresh --all')
+    ->weeklyOn(0, '03:00')
+    ->withoutOverlapping(config('ledger.refresh.timeout_seconds') / 60)
+    ->onFailure(fn () => logger()->error('Scheduled full finance ledger rebuild failed.'));

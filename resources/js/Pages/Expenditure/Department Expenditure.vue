@@ -19,7 +19,6 @@ const props = defineProps({
     activeFiscalYear:  [Number, String],
     currentFiscalYear: [Number, String],
     fyNav:             Object,
-    isScaffold:        Boolean,
 })
 
 // ── Filter state (categorical only — FY is steered by the hero navigator) ───────
@@ -161,19 +160,6 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
             class="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 dark:bg-amber-900/20 dark:border-amber-800">
             <i class="fas fa-triangle-exclamation text-amber-500 mt-0.5"></i>
             <p class="text-sm text-amber-800 dark:text-amber-200">{{ $page.props.flash.warning }}</p>
-        </div>
-
-        <!-- ═══════════════════════ Scaffold / sample-data notice ═════════════════ -->
-        <div v-if="isScaffold"
-            class="p-3.5 rounded-xl border border-dashed border-amber-400/70 bg-amber-50/60 flex items-start gap-3 dark:border-amber-300/30 dark:bg-amber-400/5">
-            <i class="fas fa-flask text-amber-600 mt-0.5 dark:text-amber-300"></i>
-            <div>
-                <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">Sample data</p>
-                <p class="text-xs text-amber-800/80 mt-0.5 dark:text-amber-200/70">
-                    Every figure on this page is hardcoded for layout review. Live SQL Server data
-                    is not connected yet.
-                </p>
-            </div>
         </div>
 
         <!-- ════════════════════════════ Page header ══════════════════════════════ -->

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Concerns\DashboardDataTransforms;
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\VersionsLedgerCache;
 use App\Models\BudgetAllocation;
 use App\Models\MonthlyExpenditure;
 use Illuminate\Http\Request;
@@ -16,6 +17,7 @@ class DashboardController extends Controller
 {
     use DashboardDataTransforms;
     use ResolvesFiscalYear;
+    use VersionsLedgerCache;
 
     public function index(Request $request): Response
     {
@@ -78,7 +80,7 @@ class DashboardController extends Controller
         try {
             // Reuse the exact cache key the Budget Allocations view populates.
             $years = collect($cache->remember(
-                "budget-allocations:years:{$username}",
+                $this->ledgerCacheKey("budget-allocations:years:{$username}"),
                 $ttl,
                 fn () => BudgetAllocation::forUser($username)
                     ->select('FinancialYear')
@@ -102,7 +104,7 @@ class DashboardController extends Controller
             $activeFiscalYear = $this->resolveFiscalYear(null, $years, $currentFiscalYear);
 
             $totalBudget = (float) $cache->remember(
-                "dashboard:budget-total:{$username}:{$activeFiscalYear}",
+                $this->ledgerCacheKey("dashboard:budget-total:{$username}:{$activeFiscalYear}"),
                 $ttl,
                 fn () => BudgetAllocation::forUser($username)
                     ->forYear((string) $activeFiscalYear)
@@ -153,7 +155,7 @@ class DashboardController extends Controller
             // $cutoff is in the key so the cache rolls forward when the fiscal
             // month advances; stale keys expire on their own TTL.
             return $cache->remember(
-                "dashboard:expenditure:{$username}:{$fiscalYear}:{$cutoff}",
+                $this->ledgerCacheKey("dashboard:expenditure:{$username}:{$fiscalYear}:{$cutoff}"),
                 $ttl,
                 function () use ($username, $fiscalYear, $cutoff) {
                     $base = fn () => MonthlyExpenditure::forUser($username)

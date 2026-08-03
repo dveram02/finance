@@ -25,7 +25,7 @@
         <env name="DB_CONNECTION" value="mysql"/>
         <env name="DB_HOST" value="localhost"/>
         <env name="DB_PORT" value="3306"/>
-        <env name="DB_DATABASE" value="inventory-app-testing"/>
+        <env name="DB_DATABASE" value="finance-testing"/>
         <env name="DB_USERNAME" value="root"/>
         <env name="DB_PASSWORD" value="password"/>
         <env name="MAIL_MAILER" value="array"/>
@@ -33,10 +33,5 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
-        <!-- Prevent audit/activity migrations from running (they target the separate auditlogs DB) -->
-        <env name="AUDIT_MIGRATIONS_ENABLED" value="false"/>
-        <!-- Prevent audit packages from writing to the auditlogs DB during tests -->
-        <env name="ACTIVITY_LOGGER_ENABLED" value="false"/>
-        <env name="AUDITING_ENABLED" value="false"/>
     </php>
 </phpunit>
