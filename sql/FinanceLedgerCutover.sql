@@ -125,12 +125,26 @@ GO
 /* ===========================================================================
    ROLLBACK
    ---------------------------------------------------------------------------
-   DROP VIEW dbo.MonthlyExpenditure;
-   DROP VIEW dbo.vw_BudgetAllocation;
-   EXEC sp_rename 'dbo.MonthlyExpenditure_Legacy', 'MonthlyExpenditure';
-   EXEC sp_rename 'dbo.vw_BudgetAllocation_Legacy', 'vw_BudgetAllocation';
+   Run sql/FinanceLedgerRollback.sql with:
 
-   CLEANUP, once production has run on the new views long enough to trust:
-   DROP VIEW dbo.MonthlyExpenditure_Legacy;
-   DROP VIEW dbo.vw_BudgetAllocation_Legacy;
+       @RestoreLegacyViews = 1
+       @DropLedgerObjects  = 0
+
+   Seconds. The application keeps working - the view names and column lists are
+   unchanged, so you are simply back to the old (slow) Monthly Expenditure. The
+   snapshot survives, so re-applying is just this file again, with no rebuild.
+
+   Do NOT hand-write the rollback. The live views are defined OVER
+   dbo.vw_FinanceLedger, so dropping objects in the wrong order breaks both
+   pages AND destroys the only copy of the original definitions. The rollback
+   script enforces the order and refuses the unsafe case.
+
+   CLEANUP, once production has run on the new views long enough to trust
+   (at least one period close):
+       DROP VIEW dbo.MonthlyExpenditure_Legacy;
+       DROP VIEW dbo.vw_BudgetAllocation_Legacy;
+
+   NOTE: after that cleanup the rollback script can no longer restore the old
+   views - the _Legacy copies are the only record of them. Keep a scripted copy
+   somewhere before dropping them if you want a way back.
    =========================================================================== */

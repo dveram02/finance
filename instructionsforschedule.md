@@ -34,9 +34,9 @@ forever.
 Nexus's Scheduler task uses **"Stop task if it runs longer than: 5 minutes"**. **Do not copy
 that value.**
 
-`schedule:run` executes due commands **synchronously**. Finance's Sunday 03:00 job rebuilds
-every fiscal year and runs for **20+ minutes**. A 5-minute limit would kill it mid-rebuild,
-every single week.
+`schedule:run` executes due commands **synchronously**. Finance's monthly 1st-of-month 03:00 job
+rebuilds every fiscal year and runs for **16-38 minutes**. A 5-minute limit would kill it
+mid-rebuild, every single month.
 
 A killed rebuild is *safe* — the snapshot swap is transactional, so the previous data survives —
 but it never completes, so the ledger silently stops advancing. Use **4 hours**.
@@ -102,7 +102,7 @@ below is not optional.
    ```dotenv
    APP_TIMEZONE=America/Port_of_Spain   # REQUIRED - without it "02:00" means 02:00 UTC = 22:00 local
    DB_HOST=<match how this server runs the app>
-   FINANCE_LEDGER_REFRESH_TIMEOUT=1800  # see "Tune the timeout" below
+   FINANCE_LEDGER_REFRESH_TIMEOUT=7200  # see "Tune the timeout" below
    ```
 
 5. Confirm the ledger SQL objects exist and the snapshot is built —
@@ -123,7 +123,7 @@ php artisan schedule:run
 # Confirm both entries are registered
 php artisan schedule:list
 #   0 2 * * *  php artisan ledger:refresh
-#   0 3 * * 0  php artisan ledger:refresh --all
+#   0 3 1 * *  php artisan ledger:refresh --all
 
 # Snapshot freshness (exits non-zero if stale — that is the health check)
 php artisan ledger:status
@@ -149,12 +149,12 @@ Use "Create Task" (not "Create Basic Task") for full control.
 ### Task 1: SWRHA Finance - Scheduler
 
 Runs `php artisan schedule:run` every minute. Laravel then fires the right commands at their
-configured times (02:00 daily, 03:00 Sundays).
+configured times (02:00 daily, 03:00 on the 1st of each month).
 
 | Setting | Value |
 |---|---|
 | Name | `SWRHA Finance - Scheduler` |
-| Description | Fires Laravel scheduled commands (nightly + weekly finance ledger snapshot refresh) |
+| Description | Fires Laravel scheduled commands (daily + monthly finance ledger snapshot refresh) |
 | Run As | `FinanceSvc` (dedicated local service account — see Before You Start) |
 | Run whether logged on or not | Yes (requires "Log on as a batch job" right) |
 | Run with highest privileges | No (unchecked — least privilege) |
@@ -178,8 +178,8 @@ configured times (02:00 daily, 03:00 Sundays).
 - Stop task if it runs longer than: **4 hours** ⚠ **NOT 5 minutes — see "How Finance differs" above**
 - If the task is already running: **Do not start a new instance**
 
-> The "Do not start a new instance" setting is what makes the long weekly rebuild safe: the
-> per-minute triggers that fire during those 20+ minutes are simply skipped.
+> The "Do not start a new instance" setting is what makes the long monthly rebuild safe: the
+> per-minute triggers that fire during those 16-38 minutes are simply skipped.
 
 ---
 
@@ -261,8 +261,8 @@ Finance even if you left it off for Nexus.**
 ## Tune the timeout after timing the full rebuild
 
 `FINANCE_LEDGER_REFRESH_TIMEOUT` (seconds) is the expiry on the `withoutOverlapping()` lock.
-The default **1800 (30 minutes)** was set against a reference server where `--all` took
-**~20 minutes**.
+The default is now **7200 (2 hours)**. The previous 1800s (30 min) was below the measured worst
+case: `--all` takes **16-38 minutes** on production.
 
 **If `--all` runs longer than the timeout, the lock expires mid-run and a second invocation can
 start on top of the first.** After `instructions.md` step 3 gives you a per-year figure, set
@@ -290,7 +290,7 @@ to run something by hand. Each writes a timestamped log to `storage\logs\schedul
 # Rebuild one year
 powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance\scripts\refresh-ledger.ps1" -Year 2026
 
-# Rebuild everything (20+ minutes)
+# Rebuild everything (16-38 minutes)
 powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance\scripts\refresh-ledger.ps1" -All
 
 # Accept a genuine large movement that tripped a sanity gate
@@ -349,8 +349,8 @@ Controlled by `routes/console.php` — no changes needed here.
 
 | Time | Command | Duration |
 |---|---|---|
-| 02:00 daily | `ledger:refresh` — rebuilds the current and prior fiscal year | ~2-4 min |
-| 03:00 Sundays | `ledger:refresh --all` — rebuilds every fiscal year | **20+ min** |
+| 02:00 daily | `ledger:refresh` — rebuilds the current and prior fiscal year | ~2-6 min |
+| 03:00, 1st of month | `ledger:refresh --all` — rebuilds every fiscal year | **16-38 min** |
 
 Closed fiscal years never change, which is why the nightly run only touches two of them.
 
@@ -358,7 +358,7 @@ Closed fiscal years never change, which is why the nightly run only touches two 
 > `0098AFinGLMaster` finishes — that window is still unknown and is tracked as a `TODO` in
 > `routes/console.php`. Until then the snapshot may miss a day's postings. Check what CFS and
 > Nexus run overnight at the same time (Nexus occupies 00:00, 01:00, 02:00 daily and 03:00
-> Sundays — **both of Finance's slots currently collide with Nexus's**).
+> Sundays — **Finance's 02:00 daily collides with Nexus's `gp:sync-reason-codes`**).
 
 ---
 
@@ -377,9 +377,9 @@ Nexus's Scheduler task does not run Finance's commands and never will. Each app 
 | Log files | `cfs\storage\logs\` | `nexus\storage\logs\` | `finance\storage\logs\` |
 
 **Scheduling collisions are the real risk here**, not naming. Nexus already occupies 00:00,
-01:00, 02:00 daily and 03:00 Sundays. Finance's 02:00 and Sunday 03:00 currently land on top of
-Nexus's `gp:sync-reason-codes` and `model:prune`. Finance's weekly rebuild is by far the
-heaviest job on the box — 20+ minutes of sustained SQL Server scanning. **Move Finance's times
+01:00, 02:00 daily and 03:00 Sundays. Finance's 02:00 daily lands on top of
+Nexus's `gp:sync-reason-codes`. Finance's monthly rebuild is by far the
+heaviest job on the box — 16-38 minutes of sustained SQL Server scanning. **Move Finance's times
 when you resolve the GL-load window**, and check both other apps first:
 
 ```powershell

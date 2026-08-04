@@ -37,14 +37,22 @@ return [
     | the current and prior fiscal years often, since closed years never change.
     | The full loop is a separate, rarer schedule.
     |
-    | Each fiscal year takes roughly 90-110 seconds to build on the replica, so
-    | the command runs without overlapping and with a generous timeout.
+    | Measured build cost for ONE fiscal year: ~93s on the replica, 74-175s on
+    | production (that box serves live Access users, so it varies). A full
+    | 13-year rebuild is therefore 16-38 minutes.
+    |
+    | timeout_seconds is the expiry on the withoutOverlapping() lock in
+    | routes/console.php. It MUST exceed the real duration of `--all`, or the
+    | lock expires mid-rebuild and a second run can start on top of the first.
+    | The old 1800s (30 min) default was below the measured worst case; 7200s
+    | (2 hours) leaves headroom. Erring high is free - the lock is released
+    | normally on completion, and the expiry only matters if a run dies.
     |
     */
 
     'refresh' => [
         'recent_years' => (int) env('FINANCE_LEDGER_REFRESH_RECENT_YEARS', 2),
-        'timeout_seconds' => (int) env('FINANCE_LEDGER_REFRESH_TIMEOUT', 1800),
+        'timeout_seconds' => (int) env('FINANCE_LEDGER_REFRESH_TIMEOUT', 7200),
     ],
 
 ];

@@ -29,11 +29,22 @@
      3. reconcile against the legacy views
      4. sql/FinanceLedgerCutover.sql
 
-   Measured on the replica (V165ICTFA0MEL\SQLEXPRESS, max server memory
-   2048 MB): fn_FinanceLedgerSource('2026') returns 2,203 rows in ~93s with no
-   user pruning. The dominant cost is the 6.38M-row scan of 0098AFinGLMaster,
-   which carries no index on FinancialYear. See the OPTIONAL INDEX section at
-   the foot of this file.
+   TIMINGS. Build cost for ONE fiscal year, no user pruning:
+     replica  (V165ICTFA0MEL\SQLEXPRESS, max server memory 2048 MB) ... ~93s
+     PRODUCTION (sqlapp\SQLEXPRESS, Standard Edition) ............ 74 - 175s
+   The production spread is real: that box serves live Access users, and the
+   same statement was sampled at both ends. Budget 16-38 minutes for all 13
+   fiscal years, and set FINANCE_LEDGER_REFRESH_TIMEOUT accordingly.
+
+   WHERE THE TIME GOES - measured on production, contrary to what an earlier
+   version of this header claimed:
+     reading the fact tables ..................... ~1s TOTAL
+       (glData 0.84s, allocation 0.02s, encumbrance 0.03s, varianceLines 0.01s)
+     everything else ............................. the remaining 72s+
+   The 6.38M-row scan of 0098AFinGLMaster is NOT the dominant cost, and the
+   FinancialYear index is NOT the lever - see the OPTIONAL INDEX section at the
+   foot of this file. The cost is in the account-base UNION, the CROSS APPLY
+   splitter and the join chain, which remain unprofiled.
    =========================================================================== */
 
 SET ANSI_NULLS ON;
@@ -234,6 +245,16 @@ RETURN
     ),
     -- FY N runs 1 Oct (N-1) to 30 Sep N. Sargable DATE bounds replace the
     -- original's per-row CASE on YEAR(CAST(ReqDateCreated AS DATE)).
+    --
+    -- Encumbrance amounts ARE snapshotted, deliberately.
+    --
+    -- An earlier revision read them live in dbo.vw_FinanceLedger so that
+    -- allocation balances were accurate intraday. That was reverted once it was
+    -- established that nobody uses the current-state balance as a "right now"
+    -- figure: executives read the previous CLOSED month and earlier, never the
+    -- current month. Snapshotting everything keeps one consistent as-of date
+    -- across GL, allocation and encumbrance, which is both simpler and less
+    -- misleading than mixing live and snapshotted money in the same row.
     encumbranceData AS (
         SELECT
             UPPER(LTRIM(RTRIM(GLAccount))) COLLATE Latin1_General_CI_AS AS AccountNumber,
@@ -405,6 +426,15 @@ GO
    the overspend is reported separately as Excess - a negative balance would
    net off another account's headroom in a totals row and overstate available
    funds.
+
+   Everything else is read straight from the snapshot, so every figure in a row
+   shares ONE as-of date. An earlier revision read encumbrances live while the
+   GL stayed snapshotted; that was reverted once it was established that nobody
+   uses the allocation balance as a current-state figure. Mixing live and
+   snapshotted money in the same row is worse than either on its own - the
+   commitment moves while the spend it becomes lags behind, so balances read
+   high. If current-state balances are ever needed, change the REFRESH CADENCE
+   rather than making one column live.
    =========================================================================== */
 CREATE OR ALTER VIEW dbo.vw_FinanceLedger
 AS
@@ -681,15 +711,28 @@ END
 GO
 
 /* ===========================================================================
-   OPTIONAL INDEX
+   OPTIONAL INDEX - NOT RECOMMENDED. Measured; it would buy ~1 second.
    ---------------------------------------------------------------------------
-   0098AFinGLMaster holds 6,377,713 rows and its only index is the primary key
-   on LineID, so every refresh scans the whole table. This index makes the
-   per-year build seek instead. It is optional because it writes to a source
-   table this application does not own - agree it with whoever maintains the
-   GL load before applying.
+   An earlier version of this comment claimed the 6,377,713-row scan of
+   0098AFinGLMaster was the dominant cost of the build, and that this index was
+   the fix. BOTH CLAIMS ARE WRONG. Measured on production (sqlapp\SQLEXPRESS):
 
-     CREATE NONCLUSTERED INDEX IX_0098AFinGLMaster_FinancialYear
-         ON dbo.[0098AFinGLMaster] (FinancialYear)
-         INCLUDE (TRXDate, AccountNumber, AccountDescription, NetChange);
+     COUNT(*) with no filter ................................. 0.95s
+     COUNT(*) WHERE FinancialYear = '2026' ................... 0.95s  (identical)
+     Full glData aggregate for one FY (4,450 accounts) ....... 0.84s
+     allocationData / encumbranceData / varianceLines ........ 0.02 / 0.03 / 0.01s
+     FULL build for one fiscal year .................... 74 - 175s
+
+   The FY filter is a scan rather than a seek, exactly as the missing index
+   implies - but it does not matter, because the entire GL side is about one
+   second. Roughly 72+ seconds of the build is in the account-base UNION, the
+   CROSS APPLY splitter and the join chain, NOT in reading the fact tables.
+
+   So this index would remove ~1s from a 74-175s build. It is not worth
+   changing a source table this application does not own. DO NOT apply it on
+   the strength of the old comment; profile the join/assembly phase instead.
+
+     -- CREATE NONCLUSTERED INDEX IX_0098AFinGLMaster_FinancialYear
+     --     ON dbo.[0098AFinGLMaster] (FinancialYear)
+     --     INCLUDE (TRXDate, AccountNumber, AccountDescription, NetChange);
    =========================================================================== */
