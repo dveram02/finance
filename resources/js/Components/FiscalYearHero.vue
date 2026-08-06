@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 
 /**
  * The fiscal-year navigator that heads every ledger page. Extracted so the
@@ -40,15 +40,26 @@ const select = (fy) => {
 // ── Year rail: keep the active year in view ─────────────────────────────────
 const yearRail = ref(null)
 
-const scrollActiveIntoView = () => {
+const scrollActiveIntoView = (behavior = 'smooth') => {
     nextTick(() => {
+        const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
         const el = yearRail.value?.querySelector('[data-active="true"]')
-        el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+        el?.scrollIntoView({
+            inline: 'center',
+            block: 'nearest',
+            behavior: reduceMotion ? 'auto' : behavior,
+        })
     })
 }
 
-onMounted(scrollActiveIntoView)
-onUnmounted(() => {})
+// Jump on first paint (an animated scroll as the page appears reads as a
+// glitch); glide on every later change.
+onMounted(() => scrollActiveIntoView('auto'))
+
+// Every page navigates with preserveState: true, which tells Inertia to REUSE
+// this instance rather than remount it — so onMounted does not fire again and
+// the rail would otherwise never re-centre after a year change.
+watch(activeYearStr, () => scrollActiveIntoView())
 
 defineExpose({ scrollActiveIntoView })
 </script>

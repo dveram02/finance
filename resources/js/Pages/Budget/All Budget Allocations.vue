@@ -1,7 +1,10 @@
-<script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+﻿<script setup>
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
+import FiscalYearHero from '@/Components/FiscalYearHero.vue'
+import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
+import { useFiscalYearNav } from '@/composables/useFiscalYearNav'
 
 const props = defineProps({
     // False when the user maps to no department at all — a permanent state that
@@ -32,25 +35,13 @@ const filters = ref({
 })
 
 // ── Fiscal year ─────────────────────────────────────────────────────────────────
-const activeYearStr = computed(() => String(props.activeFiscalYear ?? ''))
-
-const isCurrentFiscalYear = computed(() =>
-    String(props.activeFiscalYear) === String(props.currentFiscalYear)
-)
-
-// Fiscal year N runs Oct (N-1) → Sep N.
-const fiscalYearSpan = computed(() => {
-    const fy = Number(props.activeFiscalYear)
-    if (!fy) return ''
-    return `Oct ${fy - 1} – Sep ${fy}`
-})
-
+// FiscalYearHero already ignores a null or unchanged year, so no guards here.
 const goToFy = (fy) => {
-    if (fy === null || fy === undefined) return
-    if (String(fy) === activeYearStr.value) return
     filters.value.fy = String(fy)
     applyFilters()
 }
+
+useFiscalYearNav({ fyNav: () => props.fyNav, goToFy })
 
 // ── Institution cascade ─────────────────────────────────────────────────────────
 const filteredInstitutions = computed(() => {
@@ -89,30 +80,6 @@ const clearFilters = () => {
     applyFilters()
 }
 
-// ── Year rail: auto-scroll active year into view ────────────────────────────────
-const yearRail = ref(null)
-
-const scrollActiveIntoView = () => {
-    nextTick(() => {
-        const el = yearRail.value?.querySelector('[data-active="true"]')
-        el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
-    })
-}
-
-// ── Keyboard navigation (← / → between fiscal years) ────────────────────────────
-const handleKeydown = (e) => {
-    const tag = document.activeElement?.tagName
-    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return
-
-    if (e.key === 'ArrowLeft' && props.fyNav?.prev != null) {
-        e.preventDefault()
-        goToFy(props.fyNav.prev)
-    } else if (e.key === 'ArrowRight' && props.fyNav?.next != null) {
-        e.preventDefault()
-        goToFy(props.fyNav.next)
-    }
-}
-
 // ── Loading state (shown while a filter / FY / page reload is in flight) ─────────
 // Driven by Inertia's global visit events so it covers the filter selects, the
 // fiscal-year navigator, and the pagination links alike. The `start` guard keeps
@@ -122,9 +89,6 @@ let stopOnStart = null
 let stopOnFinish = null
 
 onMounted(() => {
-    window.addEventListener('keydown', handleKeydown)
-    scrollActiveIntoView()
-
     stopOnStart = router.on('start', (event) => {
         const url = event.detail?.visit?.url
         if (!url || String(url.pathname ?? url).includes('budget-allocations')) {
@@ -137,7 +101,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    window.removeEventListener('keydown', handleKeydown)
     stopOnStart?.()
     stopOnFinish?.()
 })
@@ -188,95 +151,13 @@ const formatNumber = (value) =>
             </p>
         </div>
 
-        <!-- ═══════════════════ Fiscal Year navigator (the hero) ═══════════════════ -->
-        <section class="relative overflow-hidden rounded-2xl border border-white/60 shadow-xl shadow-slate-950/8 dark:border-white/10">
-            <div class="absolute inset-0 bg-gradient-to-br from-cyan-50 via-white to-slate-100 dark:from-[#0b1625] dark:via-[#14213d] dark:to-[#0b1625]"></div>
-            <!-- Radial dot texture -->
-            <div class="absolute inset-0 opacity-[0.18] dark:hidden"
-                style="background-image: radial-gradient(circle at 1px 1px, rgba(8,47,73,0.45) 1px, transparent 0); background-size: 22px 22px;"></div>
-            <div class="absolute inset-0 hidden opacity-[0.06] dark:block"
-                style="background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.5) 1px, transparent 0); background-size: 22px 22px;"></div>
-            <!-- Gold filament along the top edge -->
-            <div class="absolute top-0 inset-x-0 h-px"
-                style="background: linear-gradient(90deg, transparent, #d97706 25%, #fbbf24 50%, #d97706 75%, transparent);"></div>
-            <!-- Soft gold glow behind the numeral -->
-            <div class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[150%] h-28 w-28 rounded-full blur-3xl"
-                style="background: radial-gradient(circle, rgba(251,191,36,0.16), transparent 70%);"></div>
-
-            <div class="relative px-6 sm:px-10 py-3.5">
-
-                <!-- Eyebrow row -->
-                <div class="flex items-center justify-between gap-4">
-                    <span class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-800 dark:text-amber-300/90">
-                        <i class="fas fa-calendar-day text-[10px]"></i>
-                        Fiscal Year
-                    </span>
-                    <span v-if="isCurrentFiscalYear"
-                        class="inline-flex items-center gap-1.5 rounded-full bg-amber-100 ring-1 ring-amber-300/70 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:bg-amber-400/15 dark:ring-amber-300/40 dark:text-amber-200">
-                        <span class="relative flex h-1.5 w-1.5">
-                            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-75"></span>
-                            <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-300"></span>
-                        </span>
-                        Current
-                    </span>
-                </div>
-
-                <!-- Stepper: prev · numeral · next -->
-                <div class="mt-2 flex items-center justify-center gap-5 sm:gap-8">
-                    <button
-                        @click="goToFy(fyNav?.prev)" :disabled="!fyNav?.prev"
-                        title="Previous fiscal year (←)" aria-label="Previous fiscal year"
-                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
-                        <i class="fas fa-chevron-left transition-transform group-hover:-translate-x-0.5"></i>
-                    </button>
-
-                    <div class="text-center min-w-[7rem] sm:min-w-[9rem]">
-                        <div class="relative inline-block leading-none">
-                            <transition name="fy" mode="out-in">
-                                <span :key="activeYearStr"
-                                    class="fy-numeral font-display block text-5xl font-bold text-slate-950 tabular-nums dark:text-white">
-                                    {{ activeFiscalYear || '—' }}
-                                </span>
-                            </transition>
-                        </div>
-                        <p class="mt-1 text-xs font-medium text-slate-600 tracking-wide dark:text-blue-100/60">
-                            {{ fiscalYearSpan }}
-                        </p>
-                    </div>
-
-                    <button
-                        @click="goToFy(fyNav?.next)" :disabled="!fyNav?.next"
-                        title="Next fiscal year (→)" aria-label="Next fiscal year"
-                        class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
-                        <i class="fas fa-chevron-right transition-transform group-hover:translate-x-0.5"></i>
-                    </button>
-                </div>
-
-                <!-- Year rail -->
-                <div v-if="years.length" class="mt-3">
-                    <div ref="yearRail"
-                        role="tablist" aria-label="Select fiscal year"
-                        class="year-rail flex items-center justify-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                        <button v-for="year in years" :key="year"
-                            role="tab"
-                            :data-active="String(year) === activeYearStr"
-                            :aria-selected="String(year) === activeYearStr"
-                            @click="goToFy(year)"
-                            :class="[
-                                'flex-shrink-0 rounded-full px-3.5 py-1 text-sm font-semibold tabular-nums transition-all duration-200',
-                                String(year) === activeYearStr
-                                    ? 'bg-gradient-to-b from-amber-300 to-amber-500 text-[#1a1205] shadow-lg shadow-amber-500/20'
-                                    : 'bg-white/70 text-cyan-800 ring-1 ring-cyan-700/10 hover:bg-cyan-50 hover:text-cyan-950 dark:bg-white/5 dark:text-blue-100/70 dark:ring-white/10 dark:hover:bg-white/10 dark:hover:text-white',
-                                String(year) === String(currentFiscalYear) && String(year) !== activeYearStr
-                                    ? 'ring-1 ring-dashed ring-amber-300/50' : '',
-                            ]">
-                            {{ year }}
-                        </button>
-                    </div>
-                </div>
-
-            </div>
-        </section>
+        <FiscalYearHero
+            :active-fiscal-year="activeFiscalYear"
+            :current-fiscal-year="currentFiscalYear"
+            :years="years"
+            :fy-nav="fyNav"
+            @select="goToFy"
+        />
 
         <!-- ════════════════════════════ KPI cards ════════════════════════════════ -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -417,21 +298,7 @@ const formatNumber = (value) =>
         <!-- ════════════════════════════ Results table ════════════════════════════ -->
         <div class="bg-surface rounded-xl shadow-sm border border-line overflow-hidden relative">
 
-            <!-- Loading overlay — financial coin spinner while a visit is in flight -->
-            <transition name="overlay">
-                <div v-if="loading"
-                    class="absolute inset-0 z-20 grid place-items-center bg-surface/70 backdrop-blur-[2px]">
-                    <div class="flex flex-col items-center gap-4">
-                        <div class="coin" aria-hidden="true">
-                            <div class="coin__face coin__front">$</div>
-                            <div class="coin__face coin__back">$</div>
-                        </div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-tx-subtle">
-                            Loading allocations<span class="loading-dots"></span>
-                        </p>
-                    </div>
-                </div>
-            </transition>
+            <LedgerLoadingOverlay :show="loading" label="Loading allocations" />
 
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-line">
@@ -513,116 +380,3 @@ const formatNumber = (value) =>
     </div>
 </template>
 
-<style scoped>
-/* Fiscal-year numeral transition — replays on every year change via :key */
-.fy-enter-active {
-    animation: fyIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.fy-leave-active {
-    animation: fyOut 0.2s ease-in forwards;
-}
-@keyframes fyIn {
-    0%   { opacity: 0; transform: translateY(0.35em) scale(0.94); filter: blur(6px); }
-    100% { opacity: 1; transform: translateY(0)     scale(1);    filter: blur(0); }
-}
-@keyframes fyOut {
-    0%   { opacity: 1; transform: translateY(0)      scale(1); }
-    100% { opacity: 0; transform: translateY(-0.3em) scale(0.97); }
-}
-
-/* Slim year-rail scrollbar */
-.year-rail::-webkit-scrollbar {
-    height: 5px;
-}
-.year-rail::-webkit-scrollbar-track {
-    background: transparent;
-}
-.year-rail::-webkit-scrollbar-thumb {
-    background: rgba(251, 191, 36, 0.28);
-    border-radius: 9999px;
-}
-.year-rail::-webkit-scrollbar-thumb:hover {
-    background: rgba(251, 191, 36, 0.5);
-}
-
-/* ── Loading overlay fade ──────────────────────────────────────────────────── */
-.overlay-enter-active,
-.overlay-leave-active {
-    transition: opacity 0.2s ease;
-}
-.overlay-enter-from,
-.overlay-leave-to {
-    opacity: 0;
-}
-
-/* ── Financial coin spinner ────────────────────────────────────────────────── */
-/* A minted gold coin flipping on its vertical axis. Two faces with hidden
-   backfaces keep the "$" upright through the whole rotation; the coin bobs
-   gently so it reads as 3-D rather than a flat spin. */
-.coin {
-    position: relative;
-    width: 58px;
-    height: 58px;
-    transform-style: preserve-3d;
-    animation: coinFlip 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite,
-               coinBob 1.5s ease-in-out infinite;
-    filter: drop-shadow(0 10px 12px rgba(180, 83, 9, 0.28));
-}
-
-.coin__face {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    border-radius: 9999px;
-    font-family: 'Playfair Display', Georgia, serif;
-    font-weight: 700;
-    font-size: 1.5rem;
-    color: #7c2d12;
-    backface-visibility: hidden;
-    background:
-        radial-gradient(circle at 34% 28%, #fffbeb 0%, #fde68a 26%, #f59e0b 62%, #d97706 84%, #b45309 100%);
-    box-shadow:
-        inset 0 2px 3px rgba(255, 255, 255, 0.65),
-        inset 0 -4px 7px rgba(120, 53, 15, 0.5),
-        inset 0 0 0 4px rgba(180, 83, 9, 0.28);   /* milled rim */
-}
-
-.coin__back {
-    transform: rotateY(180deg);
-}
-
-@keyframes coinFlip {
-    0%   { transform: rotateY(0deg); }
-    100% { transform: rotateY(360deg); }
-}
-
-@keyframes coinBob {
-    0%, 100% { translate: 0 0; }
-    50%      { translate: 0 -5px; }
-}
-
-/* Animated trailing dots on the label */
-.loading-dots::after {
-    content: '';
-    animation: loadingDots 1.4s steps(1, end) infinite;
-}
-
-@keyframes loadingDots {
-    0%   { content: ''; }
-    25%  { content: '.'; }
-    50%  { content: '..'; }
-    75%  { content: '...'; }
-    100% { content: ''; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .coin {
-        animation: coinFlip 2.4s linear infinite;
-    }
-    .loading-dots::after {
-        animation: none;
-        content: '…';
-    }
-}
-</style>

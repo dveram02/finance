@@ -56,6 +56,11 @@ class DashboardTransformsTest extends TestCase
             {
                 return $this->topCategories($rows, $n);
             }
+
+            public function resolve(mixed $requested, $years, int $current): ?int
+            {
+                return $this->resolveFiscalYear($requested, $years, $current);
+            }
         };
     }
 
@@ -107,6 +112,64 @@ class DashboardTransformsTest extends TestCase
         $this->assertSame(12, $this->h->cutoff(2025), 'past FY → complete year');
         $this->assertSame(9, $this->h->cutoff(2026), 'current FY → current period');
         $this->assertSame(0, $this->h->cutoff(2027), 'future FY → not started');
+    }
+
+    // ── resolveFiscalYear ──────────────────────────────────────────────────────
+    // Every FY-navigable page routes `?fy=` through this, so a value that gets
+    // mis-parsed here is accepted as a deliberate year request on all five.
+
+    public static function requestedFiscalYearCases(): array
+    {
+        // Available years ['2025','2026'], current FY 2026 → the default is 2026.
+        return [
+            'exact match' => ['2025', 2025],
+            'the current FY' => ['2026', 2026],
+
+            // The reason the check is a regex and not a range: (int) casting
+            // alone turns this into a valid, available year.
+            'trailing junk' => ['2025abc', 2026],
+            'decimal' => ['2025.0', 2026],
+            'leading junk' => ['abc2025', 2026],
+
+            // These were already safe — (int) yields 0, which is never available.
+            'not a year at all' => ['notayear', 2026],
+            'empty string' => ['', 2026],
+            'null' => [null, 2026],
+
+            // Well-formed but absent from the data.
+            'a year with no data' => ['1999', 2026],
+
+            // Non-strings must FALL BACK, not throw. `?fy[]=2025` produces an
+            // array, which PHP refuses to coerce to a string parameter — before
+            // this was typed mixed it was a TypeError, and on the dashboard that
+            // landed outside any try/catch as a 500.
+            'array' => [['2025'], 2026],
+            'int' => [2025, 2026],
+        ];
+    }
+
+    #[DataProvider('requestedFiscalYearCases')]
+    public function test_resolve_fiscal_year_only_accepts_a_four_digit_string(mixed $requested, int $expected): void
+    {
+        $this->assertSame(
+            $expected,
+            $this->h->resolve($requested, collect(['2025', '2026']), 2026)
+        );
+    }
+
+    public function test_resolve_fiscal_year_falls_back_to_latest_when_current_has_no_data(): void
+    {
+        // Budget data stops at FY2025 — a real shape when next year's
+        // allocations are not loaded yet. The default becomes 2025, so a
+        // malformed value legitimately resolves to 2025 here. Assertions about
+        // malformed input must compare against this default, never a literal.
+        $this->assertSame(2025, $this->h->resolve(null, collect(['2024', '2025']), 2026));
+        $this->assertSame(2025, $this->h->resolve('2025abc', collect(['2024', '2025']), 2026));
+    }
+
+    public function test_resolve_fiscal_year_returns_current_when_there_is_no_data_at_all(): void
+    {
+        $this->assertSame(2026, $this->h->resolve('2025', collect([]), 2026));
     }
 
     // ── monthlyBarData ─────────────────────────────────────────────────────────

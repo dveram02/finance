@@ -1,7 +1,8 @@
-<script setup>
-import { computed } from 'vue'
-import { Head } from '@inertiajs/vue3'
+﻿<script setup>
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { Head, router } from '@inertiajs/vue3'
 import { useDarkMode } from '@/composables/useDarkMode'
+import { useFiscalYearNav } from '@/composables/useFiscalYearNav'
 import {
   Chart as ChartJS,
   Title,
@@ -29,6 +30,8 @@ ChartJS.register(
 )
 
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
+import FiscalYearHero from '@/Components/FiscalYearHero.vue'
+import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 
 const { isDark } = useDarkMode()
 
@@ -38,6 +41,14 @@ const props = defineProps({
   // *Available flags: nothing is broken, so the copy must not say it is.
   hasAccess: { type: Boolean, default: true },
   fiscalYear: Number,
+  // Same value as fiscalYear, under the name FiscalYearHero and every sibling
+  // page use. Kept as an alias so the shared control drops in unmapped.
+  activeFiscalYear: [Number, String],
+  currentFiscalYear: [Number, String],
+  // Scoped to years with BUDGET data — this page is budget-vs-actual, so a
+  // year with spend but no allocation baseline has nothing to compare against.
+  years: { type: Array, default: () => [] },
+  fyNav: { type: Object, default: () => ({ prev: null, next: null }) },
   totalBudget: Number,
   budgetAvailable: { type: Boolean, default: true },
   expenditureAvailable: { type: Boolean, default: true },
@@ -47,6 +58,50 @@ const props = defineProps({
   monthlyExpenditure: Object,
   budgetVsActual: Object,
   expenditureByCategory: Object,
+})
+
+// ── Fiscal year navigation ────────────────────────────────────────────────────
+// The dashboard carries no other filters, so a year change is a bare visit.
+// preserveState keeps the Chart.js instances alive across the swap.
+const goToFy = (fy) => router.get(route('dashboard'), { fy: String(fy) }, {
+  preserveState: true,
+  preserveScroll: true,
+  replace: true,
+})
+
+useFiscalYearNav({ fyNav: () => props.fyNav, goToFy })
+
+// Every figure on the page is fiscal-year scoped, so a year change re-queries
+// SQL Server. Without this the page looks frozen on a cold cache.
+const loading = ref(false)
+let stopOnStart = null
+let stopOnFinish = null
+
+onMounted(() => {
+  stopOnStart = router.on('start', (event) => {
+    const url = event.detail?.visit?.url
+    if (!url || String(url.pathname ?? url).includes('dashboard')) {
+      loading.value = true
+    }
+  })
+  stopOnFinish = router.on('finish', () => {
+    loading.value = false
+  })
+})
+
+onUnmounted(() => {
+  stopOnStart?.()
+  stopOnFinish?.()
+})
+
+// A completed year's total is not a "year to date" figure, and a year that has
+// not begun has no figure at all.
+const isPastFy = computed(() =>
+  Number(props.activeFiscalYear) < Number(props.currentFiscalYear))
+
+const expenditureCardTitle = computed(() => {
+  if (!props.expenditureWindowStarted) return 'Expenditure'
+  return isPastFy.value ? 'Total Expenditure' : 'YTD Expenditure'
 })
 
 // ── Currency helpers ──────────────────────────────────────────────────────────
@@ -90,6 +145,10 @@ const usageSubLabel = computed(() => {
   if (!props.hasAccess) return 'Department access is not configured'
   if (!props.budgetAvailable) return 'Awaiting budget data'
   if (!props.expenditureAvailable) return 'Awaiting expenditure data'
+  // A future FY has a budget but no elapsed months, so every branch below
+  // would pass and report the whole allocation as "remaining" — beside two
+  // charts that correctly say the year has not started.
+  if (!props.expenditureWindowStarted) return 'Fiscal year has not started'
   if (totalExpenditure.value < 0) return 'Net credits exceed expenditure'
   if (overBudget.value) return 'TTD ' + formatAmount(overage.value) + ' over budget'
   return 'TTD ' + formatAmount(variance.value) + ' remaining'
@@ -319,156 +378,194 @@ const categoryBarOptions = computed(() => ({
       </div>
     </div>
 
+    <FiscalYearHero
+      :active-fiscal-year="activeFiscalYear"
+      :current-fiscal-year="currentFiscalYear"
+      :years="years"
+      :fy-nav="fyNav"
+      @select="goToFy"
+    />
+
     <NoAccessNotice v-if="!hasAccess" />
 
-    <!-- KPI cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <!-- Everything below is fiscal-year scoped, so the loading veil covers the
+         KPI cards as well as the charts. Veiling only the charts would leave
+         stale TTD totals legible while the new year loads. -->
+    <div class="relative space-y-5">
+      <LedgerLoadingOverlay :show="loading" label="Loading dashboard" />
 
-      <!-- Total Budget -->
-      <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
-        <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #14b8a6;"></div>
-        <div class="pl-1">
-          <div class="flex items-start justify-between mb-3">
+      <!-- KPI cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+        <!-- Total Budget -->
+        <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+          <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #14b8a6;"></div>
+          <div class="pl-1">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Budget</p>
+                <!-- Goods and services only — vw_BudgetAllocation is scoped to the 41
+                     reporting-line accounts, so payroll is excluded from this figure. -->
+                <p class="text-[10px] text-tx-subtle mt-0.5">Approved allocation, goods and services</p>
+              </div>
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(20,184,166,0.1);">
+                <i class="fas fa-chart-pie text-sm" style="color: #0d9488;"></i>
+              </div>
+            </div>
+            <!-- Narrowest condition first. This card is not currently reachable
+                 with hasAccess false and budgetAvailable true — budgetTotal()
+                 reports unavailable on the empty-years path — but the ordering
+                 must not depend on that, or a change there turns this into the
+                 fake zero the expenditure card had. -->
+            <template v-if="!hasAccess">
+              <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not assigned</p>
+              <p class="text-[10px] text-tx-subtle mt-1">Department access is not configured.</p>
+            </template>
+            <template v-else-if="!budgetAvailable">
+              <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Budget data unavailable</p>
+              <p class="text-[10px] text-tx-subtle mt-1">No budget allocation could be loaded for this fiscal year.</p>
+            </template>
+            <template v-else>
+              <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
+              <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
+            </template>
+          </div>
+        </div>
+
+        <!-- Budget Utilization -->
+        <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+          <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" :style="{ background: utilizationColor }"></div>
+          <div class="pl-1">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Budget Usage</p>
+                <p class="text-[10px] text-tx-subtle mt-0.5">{{ usageSubLabel }}</p>
+              </div>
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: utilizationColor + '18' }">
+                <i class="fas fa-gauge-high text-sm" :style="{ color: utilizationColor }"></i>
+              </div>
+            </div>
+            <template v-if="usageAvailable">
+              <p class="font-display text-2xl font-bold leading-none" :style="{ color: utilizationColor }">{{ budgetUtilization }}%</p>
+              <!-- Progress bar -->
+              <div class="mt-3 h-1.5 bg-surface-3 rounded-full overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-700"
+                  :style="{ width: utilizationBarWidth + '%', background: utilizationColor }"
+                ></div>
+              </div>
+            </template>
+            <template v-else>
+              <p class="font-display text-2xl font-bold leading-none text-tx-muted">&mdash;</p>
+            </template>
+          </div>
+        </div>
+
+        <!-- YTD Expenditure -->
+        <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+          <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #f59e0b;"></div>
+          <div class="pl-1">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">{{ expenditureCardTitle }}</p>
+                <p class="text-[10px] text-tx-subtle mt-0.5">
+                  FY {{ fiscalYear }}<template v-if="hasAccess">
+                  <span v-if="!expenditureWindowStarted"> &middot; fiscal year has not started</span>
+                  <span v-else-if="isPastFy"> &middot; full year</span>
+                  <span v-else-if="latestPeriodLabel"> &middot; through {{ latestPeriodLabel }}</span>
+                  </template>
+                </p>
+              </div>
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
+                <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
+              </div>
+            </div>
+            <!-- Ordered narrowest-first, and the order is load-bearing. This
+                 query does not FAIL for a user with no department: the access
+                 view is joined live, so it succeeds and returns no rows, leaving
+                 expenditureAvailable true. Testing that first (as this card used
+                 to) made the branches below unreachable and printed a fabricated
+                 TTD 0.00 to every unmapped user. The same applies to a fiscal
+                 year that has not begun.
+                 hasAccess is safe to test first because the controller forces it
+                 true when the probe itself fails — so it can only be false when
+                 the probe succeeded and said no, never during an outage. -->
+            <template v-if="!hasAccess">
+              <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not assigned</p>
+              <p class="text-[10px] text-tx-subtle mt-1">Department access is not configured.</p>
+            </template>
+            <template v-else-if="!expenditureAvailable">
+              <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Expenditure unavailable</p>
+              <p class="text-[10px] text-tx-subtle mt-1">Financial data source could not be reached.</p>
+            </template>
+            <template v-else-if="!expenditureWindowStarted">
+              <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not started</p>
+              <p class="text-[10px] text-tx-subtle mt-1">This fiscal year has not begun.</p>
+            </template>
+            <template v-else>
+              <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
+              <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
+            </template>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Chart grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
+
+        <!-- Card 1: Budget Burn-up -->
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
+          <div class="mb-4 flex items-start justify-between">
             <div>
-              <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Budget</p>
-              <!-- Goods and services only — vw_BudgetAllocation is scoped to the 41
-                   reporting-line accounts, so payroll is excluded from this figure. -->
-              <p class="text-[10px] text-tx-subtle mt-0.5">Approved allocation, goods and services</p>
+              <h3 class="text-sm font-bold text-tx-primary">Cumulative Spend vs Budget</h3>
+              <p class="text-xs text-tx-muted mt-0.5">Cumulative actual vs annual allocation (TTD)</p>
             </div>
-            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(20,184,166,0.1);">
-              <i class="fas fa-chart-pie text-sm" style="color: #0d9488;"></i>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(20,184,166,0.1);">
+              <i class="fas fa-chart-line text-xs" style="color: #0d9488;"></i>
             </div>
           </div>
-          <template v-if="budgetAvailable">
-            <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
-            <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
-          </template>
-          <template v-else-if="!hasAccess">
-            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not assigned</p>
-            <p class="text-[10px] text-tx-subtle mt-1">Department access is not configured.</p>
-          </template>
-          <template v-else>
-            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Budget data unavailable</p>
-            <p class="text-[10px] text-tx-subtle mt-1">No budget allocation could be loaded for this fiscal year.</p>
-          </template>
+          <div class="flex-1 min-h-[220px]">
+            <Line v-if="!burnupState.empty" :data="lineData" :options="lineOptions" />
+            <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ burnupState.msg }}</div>
+          </div>
         </div>
-      </div>
 
-      <!-- Budget Utilization -->
-      <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
-        <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" :style="{ background: utilizationColor }"></div>
-        <div class="pl-1">
-          <div class="flex items-start justify-between mb-3">
+        <!-- Card 2: Net Categories -->
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
+          <div class="mb-4 flex items-start justify-between">
             <div>
-              <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Budget Usage</p>
-              <p class="text-[10px] text-tx-subtle mt-0.5">{{ usageSubLabel }}</p>
+              <h3 class="text-sm font-bold text-tx-primary">Net Categories</h3>
+              <p class="text-xs text-tx-muted mt-0.5">Top material categories + Other &middot; net of corrections (TTD)</p>
             </div>
-            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: utilizationColor + '18' }">
-              <i class="fas fa-gauge-high text-sm" :style="{ color: utilizationColor }"></i>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(168,85,247,0.1);">
+              <i class="fas fa-chart-bar text-xs" style="color: #9333ea;"></i>
             </div>
           </div>
-          <template v-if="usageAvailable">
-            <p class="font-display text-2xl font-bold leading-none" :style="{ color: utilizationColor }">{{ budgetUtilization }}%</p>
-            <!-- Progress bar -->
-            <div class="mt-3 h-1.5 bg-surface-3 rounded-full overflow-hidden">
-              <div
-                class="h-full rounded-full transition-all duration-700"
-                :style="{ width: utilizationBarWidth + '%', background: utilizationColor }"
-              ></div>
-            </div>
-          </template>
-          <template v-else>
-            <p class="font-display text-2xl font-bold leading-none text-tx-muted">&mdash;</p>
-          </template>
+          <div class="flex-1 min-h-[300px]">
+            <Bar v-if="!categoryState.empty" :data="categoryBarData" :options="categoryBarOptions" />
+            <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ categoryState.msg }}</div>
+          </div>
         </div>
-      </div>
 
-      <!-- YTD Expenditure -->
-      <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
-        <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #f59e0b;"></div>
-        <div class="pl-1">
-          <div class="flex items-start justify-between mb-3">
+        <!-- Card 3: Monthly Expenditure -->
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col lg:col-span-2 xl:col-span-1">
+          <div class="mb-4 flex items-start justify-between">
             <div>
-              <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">YTD Expenditure</p>
-              <p class="text-[10px] text-tx-subtle mt-0.5">
-                FY {{ fiscalYear }}<span v-if="latestPeriodLabel"> &middot; through {{ latestPeriodLabel }}</span>
-              </p>
+              <h3 class="text-sm font-bold text-tx-primary">Monthly Expenditure</h3>
+              <p class="text-xs text-tx-muted mt-0.5">Spend by month (TTD)</p>
             </div>
-            <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
-              <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(245,158,11,0.1);">
+              <i class="fas fa-chart-bar text-xs" style="color: #d97706;"></i>
             </div>
           </div>
-          <template v-if="expenditureAvailable">
-            <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
-            <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
-          </template>
-          <template v-else-if="!hasAccess">
-            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not assigned</p>
-            <p class="text-[10px] text-tx-subtle mt-1">Department access is not configured.</p>
-          </template>
-          <template v-else>
-            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Expenditure unavailable</p>
-            <p class="text-[10px] text-tx-subtle mt-1">Financial data source could not be reached.</p>
-          </template>
+          <div class="flex-1 min-h-[220px]">
+            <Bar v-if="!monthlyState.empty" :data="barData" :options="barOptions" />
+            <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ monthlyState.msg }}</div>
+          </div>
         </div>
+
       </div>
-
-    </div>
-
-    <!-- Chart grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
-
-      <!-- Card 1: Budget Burn-up -->
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
-        <div class="mb-4 flex items-start justify-between">
-          <div>
-            <h3 class="text-sm font-bold text-tx-primary">Cumulative Spend vs Budget</h3>
-            <p class="text-xs text-tx-muted mt-0.5">Cumulative actual vs annual allocation (TTD)</p>
-          </div>
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(20,184,166,0.1);">
-            <i class="fas fa-chart-line text-xs" style="color: #0d9488;"></i>
-          </div>
-        </div>
-        <div class="flex-1 min-h-[220px]">
-          <Line v-if="!burnupState.empty" :data="lineData" :options="lineOptions" />
-          <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ burnupState.msg }}</div>
-        </div>
-      </div>
-
-      <!-- Card 2: Net Categories -->
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
-        <div class="mb-4 flex items-start justify-between">
-          <div>
-            <h3 class="text-sm font-bold text-tx-primary">Net Categories</h3>
-            <p class="text-xs text-tx-muted mt-0.5">Top material categories + Other &middot; net of corrections (TTD)</p>
-          </div>
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(168,85,247,0.1);">
-            <i class="fas fa-chart-bar text-xs" style="color: #9333ea;"></i>
-          </div>
-        </div>
-        <div class="flex-1 min-h-[300px]">
-          <Bar v-if="!categoryState.empty" :data="categoryBarData" :options="categoryBarOptions" />
-          <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ categoryState.msg }}</div>
-        </div>
-      </div>
-
-      <!-- Card 3: Monthly Expenditure -->
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col lg:col-span-2 xl:col-span-1">
-        <div class="mb-4 flex items-start justify-between">
-          <div>
-            <h3 class="text-sm font-bold text-tx-primary">Monthly Expenditure</h3>
-            <p class="text-xs text-tx-muted mt-0.5">Spend by month (TTD)</p>
-          </div>
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(245,158,11,0.1);">
-            <i class="fas fa-chart-bar text-xs" style="color: #d97706;"></i>
-          </div>
-        </div>
-        <div class="flex-1 min-h-[220px]">
-          <Bar v-if="!monthlyState.empty" :data="barData" :options="barOptions" />
-          <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ monthlyState.msg }}</div>
-        </div>
-      </div>
-
-    </div>
+    </div><!-- /loading region -->
   </div>
 </template>

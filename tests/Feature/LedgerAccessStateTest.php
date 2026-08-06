@@ -79,6 +79,33 @@ class LedgerAccessStateTest extends TestCase
             );
     }
 
+    /**
+     * A user with no mapping does not make the expenditure query FAIL — the
+     * access view is joined live, so it succeeds and simply returns no rows.
+     * That leaves hasAccess false and expenditureAvailable TRUE at the same
+     * time, which is the exact pairing the dashboard's expenditure KPI card
+     * has to branch on in the right order: it used to test availability first,
+     * making the "Not assigned" branch unreachable and printing a fabricated
+     * TTD 0.00 to every unmapped user.
+     *
+     * The rendering is not assertable from here, but the prop combination is,
+     * and pinning it stops a future reader concluding that "no access" implies
+     * "unavailable" and collapsing those branches back together.
+     */
+    public function test_no_access_does_not_imply_the_expenditure_source_is_unavailable(): void
+    {
+        $this->requireSqlServer();
+
+        $this->actingAs(User::factory()->create())
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Dashboard')
+                ->where('hasAccess', false)
+                ->where('expenditureAvailable', true)
+            );
+    }
+
     public function test_the_no_access_state_does_not_flash_an_outage_warning(): void
     {
         $this->requireSqlServer();

@@ -61,7 +61,7 @@ Monthly Expenditure's inline overlay is byte-identical to `LedgerLoadingOverlay`
 ### Decisions taken
 
 - **Year scope = budget years only** (`vw_BudgetAllocation`, FY2025+). The Dashboard is a budget-vs-actual page; a year with expenditure but no allocation baseline gives a burn-up chart with no budget line and two dead KPI cards. It also preserves the deliberate cache-key sharing documented in `CLAUDE.md` — the Dashboard reuses the exact `budget-allocations:years:{username}` key the Budget page writes, so FY navigation costs **zero** additional queries. FY2014–2024 expenditure history stays reachable from Monthly Expenditure.
-- **[r2] The Dashboard gets a *compact* FY control, not a second hero band** — a `variant="compact"` prop on the **same** `FiscalYearHero`, so consistency is structural rather than a promise. It nests inside the existing welcome band.
+- ~~**[r2] The Dashboard gets a *compact* FY control, not a second hero band**~~ — **[BUILT: reverted]** A `variant="compact"` prop was implemented, but the row layout did not render acceptably in place. The Dashboard now uses the **standard `FiscalYearHero` band**, identical to Budget Allocations and the two Expenditure pages, sitting directly below the welcome header. The `variant` prop and its layout computeds were removed rather than left in as an unused code path — an untried branch in a shared component is exactly the drift risk this component exists to prevent. `FiscalYearHero`'s net diff is now only the rail-scroll fix.
 - **All four duplicating pages converge on the shared components** in this change.
 
 ---
@@ -150,7 +150,11 @@ watch(activeYearStr, () => scrollActiveIntoView())
 
 `'auto'` on mount avoids a visible scroll animation as the page appears; the `prefers-reduced-motion` guard matches what `useLedgerTable.scrollMonths()` already does. Held arrow keys retarget an in-flight smooth scroll rather than queueing — acceptable, and worth an eyeball during verification (step 6). Keep `defineExpose`.
 
-**[r2] b. Add `variant: { type: String, default: 'hero' }`** accepting `'hero'` | `'compact'`.
+**[r2] b. ~~Add `variant`~~ — [BUILT: dropped].** The compact variant was implemented and removed; see Decisions. All four pages now render the single existing layout, and this is the component's only change.
+
+<details><summary>Original spec, kept for the record</summary>
+
+**Add `variant: { type: String, default: 'hero' }`** accepting `'hero'` | `'compact'`.
 
 - `'hero'` — today's markup, byte-for-byte. Existing call sites pass nothing and are unaffected.
 - `'compact'` — drops the `<section>` chrome (no gradient wash, dot texture, gold filament, glow, border or shadow) and lays the same three pieces out in a row:
@@ -161,6 +165,8 @@ FISCAL YEAR  ● Current
 ```
 
 Concretely: outer element becomes `<div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">`; the numeral drops `text-5xl` → `text-3xl` and the `min-w-[7rem] sm:min-w-[9rem]` reservation; the year span moves inline beside the numeral; the rail loses `mt-3` and switches `justify-center` → `sm:justify-start`. **Every colour, ring, gradient, transition name and `data-active` binding stays shared** — bind the variant-dependent classes through a small `computed`, never by forking the template into two independent trees, or the two will drift exactly as the four pages did. The `.fy-*` and `.year-rail` scoped styles need no change.
+
+</details>
 
 ### 3. New `resources/js/composables/useFiscalYearNav.js`
 
@@ -187,7 +193,7 @@ import { useFiscalYearNav } from '@/composables/useFiscalYearNav'
 `onMounted`/`onUnmounted` are for the `router.on` subscriptions only — the keydown listener lives inside the composable.
 
 - Add props: `years: { type: Array, default: () => [] }`, `activeFiscalYear: [Number, String]`, `currentFiscalYear: [Number, String]`, `fyNav: { type: Object, default: () => ({ prev: null, next: null }) }`.
-- **[r2]** Render `<FiscalYearHero variant="compact" … @select="goToFy" />` **inside** the welcome band's inner `<div class="relative">` (line 310): make that `flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5`, text block left, control right. Stacks under the date line on mobile.
+- **[BUILT]** Render `<FiscalYearHero … @select="goToFy" />` as a **sibling directly below the welcome band**, before `<NoAccessNotice>` — the same placement and the same full band as the other four pages. (r2 called for a compact control nested inside the welcome header; it did not render acceptably and was reverted, taking the `variant` prop with it.)
 - `goToFy(fy)`:
   ```js
   const goToFy = (fy) => router.get(route('dashboard'), { fy: String(fy) },
@@ -303,7 +309,7 @@ The rest of `LedgerAccessStateTest` is unaffected — the new props are additive
 4. `npm run build` — four page rewrites fail at compile time if at all.
 5. `php artisan cache:clear file` (budget/ledger caches are on the `file` store, not the default), then `composer dev` and sign in as **FFIGUERA1** — per `CLAUDE.md` (measured 2026-08-06) the only user with an active access mapping; any other account renders empty pages by design.
 6. Manual checks on `/dashboard`:
-   - The compact control sits inside the welcome band; its chips, gold active pill, dashed current-year ring and "Current" badge look identical to the hero band on `/monthly-expenditure` viewed side by side, in **both** light and dark mode.
+   - **[BUILT]** The FY band sits directly below the welcome header and is indistinguishable from the one on `/monthly-expenditure` viewed side by side, in **both** light and dark mode — it is now literally the same component with no variant.
    - Clicking FY2025 sets `?fy=2025` and moves every figure together — Total Budget, Budget Usage, Total Expenditure, all three charts.
    - ← / → step years; inert while a `<select>` has focus; inert at the first/last year. **[r3]** Hold an arrow key down and confirm the rail's retargeting scroll looks acceptable rather than juddering.
    - On FY2025 the third KPI reads **Total Expenditure / full year**, not "YTD … through".

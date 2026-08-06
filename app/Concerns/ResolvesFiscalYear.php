@@ -74,8 +74,17 @@ trait ResolvesFiscalYear
     /**
      * Pick the fiscal year to display: the requested one if it has data,
      * otherwise the current FY if present, otherwise the latest FY with data.
+     *
+     * $requested is raw request input, so it is typed mixed deliberately: it may
+     * be a string, null, or — from `?fy[]=x` — an array, which PHP would refuse
+     * to coerce to a ?string parameter and throw on. Anything that is not a
+     * four-digit string is not a fiscal year and falls through to the default.
+     *
+     * The regex is doing the real work, not the list lookup: (int) 'notayear'
+     * is 0 and never matches an available year, but (int) '2025abc' is 2025 and
+     * would otherwise be accepted as a deliberate request for FY2025.
      */
-    protected function resolveFiscalYear(?string $requested, $years, int $currentFiscalYear): ?int
+    protected function resolveFiscalYear(mixed $requested, $years, int $currentFiscalYear): ?int
     {
         if ($years->isEmpty()) {
             return $currentFiscalYear;
@@ -83,7 +92,9 @@ trait ResolvesFiscalYear
 
         $available = $years->map(fn ($y) => (int) $y);
 
-        if ($requested !== null && $available->contains((int) $requested)) {
+        if (is_string($requested)
+            && preg_match('/^\d{4}$/', $requested)
+            && $available->contains((int) $requested)) {
             return (int) $requested;
         }
 

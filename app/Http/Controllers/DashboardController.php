@@ -33,8 +33,17 @@ class DashboardController extends Controller
         // The budget total drives the Total Budget KPI and the flat "Annual
         // Budget" reference line. It comes from vw_BudgetAllocation (the same
         // source as the Budget Allocations view) for the active fiscal year.
-        ['fiscalYear' => $fiscalYear, 'totalBudget' => $totalBudget, 'available' => $budgetAvailable]
-            = $this->budgetTotal($username);
+        //
+        // The fiscal year the user asked for is passed straight through as raw
+        // input; budgetTotal() takes it as mixed and validates it. Coercing it
+        // to ?string here would throw on `?fy[]=x` before any try/catch runs.
+        [
+            'fiscalYear' => $fiscalYear,
+            'totalBudget' => $totalBudget,
+            'available' => $budgetAvailable,
+            'years' => $years,
+            'fyNav' => $fyNav,
+        ] = $this->budgetTotal($username, $request->input('fy'));
 
         // The expenditure window is "up to the current fiscal month" for the
         // active FY (whole year for a past FY, nothing for a future FY).
@@ -45,7 +54,16 @@ class DashboardController extends Controller
         return Inertia::render('Dashboard', [
             'userName' => $request->user()->name,
             'hasAccess' => $hasAccess,
+            // fiscalYear and activeFiscalYear are the same value under two
+            // names: the dashboard's own copy has always read `fiscalYear`,
+            // while FiscalYearHero and every sibling page expect
+            // `activeFiscalYear`. The alias is what lets the shared control
+            // drop in with no prop mapping.
             'fiscalYear' => $fiscalYear,
+            'activeFiscalYear' => $fiscalYear,
+            'currentFiscalYear' => $this->currentFiscalYear(),
+            'years' => $years,
+            'fyNav' => $fyNav,
             'totalBudget' => $totalBudget,
             'budgetAvailable' => $budgetAvailable,
             'expenditureAvailable' => $expenditure['available'],
@@ -98,13 +116,25 @@ class DashboardController extends Controller
      * successful query that returns no years for the user is also treated as
      * unavailable (no budget configured ≠ a real zero allocation).
      *
-     * @return array{fiscalYear:int, totalBudget:float, available:bool}
+     * The dashboard's fiscal-year rail is scoped to years with BUDGET data
+     * rather than every year with expenditure. This page is budget-vs-actual:
+     * a year with spend but no allocation baseline would draw a burn-up chart
+     * with no budget line and leave two KPI cards dead. It also means the year
+     * list reuses the exact cache key the Budget Allocations page writes, so
+     * navigation costs no extra queries. FY2014-2024 expenditure history stays
+     * reachable from the Monthly Expenditure page.
+     *
+     * $requestedFy is raw request input (mixed, possibly an array).
+     *
+     * @return array{fiscalYear:int, totalBudget:float, available:bool,
+     *               years:array<int,string>, fyNav:array{prev:?int, next:?int}}
      */
-    private function budgetTotal(string $username): array
+    private function budgetTotal(string $username, mixed $requestedFy = null): array
     {
         $cache = Cache::store(config('budget.cache.store'));
         $ttl = config('budget.cache.minutes') * 60;
         $currentFiscalYear = $this->currentFiscalYear();
+        $noNav = ['prev' => null, 'next' => null];
 
         try {
             // Reuse the exact cache key the Budget Allocations view populates.
@@ -127,10 +157,12 @@ class DashboardController extends Controller
                     'fiscalYear' => $currentFiscalYear,
                     'totalBudget' => 0.0,
                     'available' => false,
+                    'years' => [],
+                    'fyNav' => $noNav,
                 ];
             }
 
-            $activeFiscalYear = $this->resolveFiscalYear(null, $years, $currentFiscalYear);
+            $activeFiscalYear = $this->resolveFiscalYear($requestedFy, $years, $currentFiscalYear);
 
             $totalBudget = (float) $cache->remember(
                 $this->ledgerCacheKey("dashboard:budget-total:{$username}:{$activeFiscalYear}"),
@@ -144,20 +176,48 @@ class DashboardController extends Controller
                 'fiscalYear' => $activeFiscalYear,
                 'totalBudget' => $totalBudget,
                 'available' => true,
+                'years' => $years->all(),
+                'fyNav' => $this->fiscalYearNav($activeFiscalYear, $years),
             ];
         } catch (\Throwable $e) {
             Log::error('Dashboard budget total query failed.', [
                 'username' => $username,
-                'fy' => $currentFiscalYear,
+                // The year that actually failed, not the current one — during an
+                // outage those differ whenever the user was browsing history.
+                'fy' => $requestedFy,
                 'exception' => $e->getMessage(),
             ]);
 
             return [
-                'fiscalYear' => $currentFiscalYear,
+                // Stay on the year the user asked for. Snapping back to the
+                // current FY during an outage moves the page under them and
+                // reads as "that year vanished" rather than "try again later".
+                'fiscalYear' => $this->fallbackFiscalYear($requestedFy, $currentFiscalYear),
                 'totalBudget' => 0.0,
                 'available' => false,
+                'years' => [],
+                'fyNav' => $noNav,
             ];
         }
+    }
+
+    /**
+     * The fiscal year to display when the source could not be reached.
+     *
+     * resolveFiscalYear() validates a requested year against the list of years
+     * that have data; on this path there is no list, so the gate is repeated
+     * here against a plausible range instead. Same regex-before-cast rule:
+     * (int) '2025abc' is 2025, and is not a request for FY2025.
+     */
+    private function fallbackFiscalYear(mixed $requested, int $currentFiscalYear): int
+    {
+        if (! is_string($requested) || ! preg_match('/^\d{4}$/', $requested)) {
+            return $currentFiscalYear;
+        }
+
+        $year = (int) $requested;
+
+        return ($year >= 2000 && $year <= $currentFiscalYear + 1) ? $year : $currentFiscalYear;
     }
 
     // =========================================================================
