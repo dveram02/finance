@@ -3,11 +3,17 @@
 # ============================================================================
 # Run via Windows Task Scheduler every 30 minutes.
 #
-# This is the Finance equivalent of the Nexus "Queue Health Check" task, but it
-# watches a DIFFERENT failure. Finance dispatches no queued jobs at all (no
-# app\Jobs, no app\Notifications, no ShouldQueue), so there is no queue worker
-# to monitor. What it has instead is a scheduled SQL Server snapshot that the
-# whole application reads from.
+# THIS IS THE ONLY WINDOWS SCHEDULED TASK FINANCE REGISTERS. There is no
+# scheduler task (the refresh is a SQL Server Agent job) and no queue worker
+# (Finance dispatches nothing: no app\Jobs, no app\Notifications, no
+# ShouldQueue). What it monitors is the SQL Server snapshot that the whole
+# application reads from.
+#
+# It is also the ONLY alerting path, because Database Mail is not configured on
+# sqlapp\SQLEXPRESS - a failed Agent job writes to sysjobhistory and the Windows
+# Application event log and nowhere a human looks. And a job that is DISABLED
+# never fails, so it would send nothing even once mail is enabled. This task is
+# not optional.
 #
 # The failure this exists to catch:
 #   If the scheduler stops, NOTHING errors. No exception, no warning banner, no
@@ -99,24 +105,30 @@ if (-not $apacheRunning) {
     Send-Alert "SWRHA Finance - Apache Down" "Apache HTTP Server is not running on the server."
 }
 
-# ── Is the scheduler task itself alive? ─────────────────────────────────────
-# Checked independently of snapshot age, because it fails FIRST: the task can
-# stop hours before the snapshot is old enough to trip the age threshold.
-try {
-    $schedulerTask = Get-ScheduledTask -TaskName "SWRHA Finance - Scheduler" -ErrorAction SilentlyContinue
-    if (-not $schedulerTask) {
-        Write-Log "CRITICAL: Scheduled task 'SWRHA Finance - Scheduler' does not exist."
-        Send-Alert "SWRHA Finance - Scheduler Task Missing" "The 'SWRHA Finance - Scheduler' task is not registered. The ledger will go stale."
-    } elseif ($schedulerTask.State -eq "Disabled") {
-        Write-Log "CRITICAL: Scheduled task 'SWRHA Finance - Scheduler' is DISABLED."
-        Send-Alert "SWRHA Finance - Scheduler Disabled" "The 'SWRHA Finance - Scheduler' task is disabled. The ledger will go stale."
-    } else {
-        $info = Get-ScheduledTaskInfo -TaskName "SWRHA Finance - Scheduler" -ErrorAction SilentlyContinue
-        Write-Log "OK: Scheduler task state=$($schedulerTask.State), last run=$($info.LastRunTime), last result=$($info.LastTaskResult)"
-    }
-} catch {
-    Write-Log "WARNING: Could not query the scheduler task: $($_.Exception.Message)"
-}
+# ── NO SCHEDULER TASK CHECK — deliberate ────────────────────────────────────
+# An earlier version checked Get-ScheduledTask "SWRHA Finance - Scheduler".
+# That task no longer exists: the refresh moved to the SQL Server Agent job
+# 'SWRHA Finance - Ledger Refresh' (sql\FinanceLedgerAgentJob.sql), because the
+# instance is merely NAMED sqlapp\SQLEXPRESS while its edition is Standard.
+#
+# It is NOT replaced by an equivalent Agent-job check, for two reasons:
+#
+#   1. Reading msdb.dbo.sysjobs requires granting the `finance` login
+#      SQLAgentReaderRole in msdb. This script deliberately holds no SQL
+#      credentials of its own - it delegates to `php artisan`, which reads .env.
+#      Querying the job directly would mean either widening a read-only login's
+#      rights or putting credentials in this file.
+#
+#   2. It would not catch anything the freshness check below misses. A job that
+#      is disabled, deleted, failing, or succeeding against a dead linked server
+#      all produce the same observable symptom: RefreshedAt stops advancing.
+#      Asserting staleness against the clock covers every cause at once.
+#
+# If you do want the job's own state surfaced here, grant the role:
+#     USE msdb; CREATE USER [finance] FOR LOGIN [finance];
+#     ALTER ROLE SQLAgentReaderRole ADD MEMBER [finance];
+# and add the probe to App\Console\Commands\LedgerStatus so it stays behind
+# artisan rather than being re-implemented here with a second set of credentials.
 
 # ── Snapshot freshness (the real check) ─────────────────────────────────────
 try {
@@ -133,8 +145,14 @@ The finance ledger snapshot has failed its freshness check.
 $($statusOutput -join "`r`n")
 
 The application is still serving data, but the figures are out of date.
-Check that the 'SWRHA Finance - Scheduler' task is running, then run:
-    php artisan ledger:refresh
+
+Check the SQL Agent job 'SWRHA Finance - Ledger Refresh' on sqlapp\SQLEXPRESS:
+  - is the job enabled, and is the SQL Server Agent service running?
+  - SELECT * FROM msdb.dbo.sysjobhistory for the failure reason
+  - SELECT * FROM FinanceAutomationSystem.dbo.FinanceLedgerRefresh for Outcome/Message
+
+An Outcome of 'ABORTED' means a sanity gate held the previous snapshot on
+purpose - read the Message before forcing anything.
 "@
     } else {
         Write-Log "OK: Ledger snapshot is fresh."

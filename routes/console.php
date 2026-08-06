@@ -2,19 +2,34 @@
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
 // =============================================================================
-// Finance ledger snapshot
+// Finance ledger snapshot — SCHEDULED IN SQL SERVER AGENT, NOT HERE
 // =============================================================================
-// Scheduled from Laravel rather than SQL Agent, because production's SQL Server
-// edition is unconfirmed and Express has no Agent.
+// An earlier revision registered the refresh here, justified by "production's
+// SQL Server edition is unconfirmed and Express has no Agent". That was wrong:
+// the instance is NAMED sqlapp\SQLEXPRESS but its edition is Standard (2022,
+// EngineEdition 2), Agent is running and Agent XPs is enabled.
 //
-// CADENCE.
+// The refresh is nothing but an EXEC of a stored procedure, so it now lives in
+// the Agent job `SWRHA Finance - Ledger Refresh` — see sql/FinanceLedgerAgentJob.sql
+// and instructionsforschedule.md. That removed 1,440 php.exe bootstraps a day,
+// and removed a MySQL dependency from a SQL Server refresh (withoutOverlapping()
+// keeps its lock in the default cache store, so MySQL being down blocked a job
+// that never touches MySQL). Agent refuses to start a job that is already
+// running, which is a direct replacement for that lock.
+//
+// DO NOT re-register the schedule here. `ledger:refresh` still exists for manual
+// runs, but a Laravel entry plus the Agent job would double-schedule the same
+// proc, and nothing at the SQL layer prevents two concurrent refreshes — see the
+// sp_getapplock note in sql/FinanceLedgerAgentJob.sql, Appendix A.
+//
+// CADENCE (implemented in the Agent job step, documented here because this is
+// where anyone looks first).
 //
 // A fiscal period closes mid-to-late within its OWN month - July closes in
 // July - so by the 1st of the following month the previous month is complete.
@@ -41,18 +56,13 @@ Artisan::command('inspire', function () {
 // CADENCE, not by making one column live - live encumbrance against a
 // snapshotted GL makes balances read high, which is the wrong direction.
 //
-// withoutOverlapping() matters: a single year takes 74-175s on production, so a
-// slow night must not stack runs.
+// The Agent job runs at 21:30 — after the business day, and clear of the 01:15
+// backup, syspolicy_purge_history at 02:00, and Nexus at 00:00/01:00/02:00.
 //
-// TODO: move the daily run to just after the GL load that populates
-// 0098AFinGLMaster finishes — that window is still not confirmed.
-
-Schedule::command('ledger:refresh')
-    ->dailyAt('02:00')
-    ->withoutOverlapping(config('ledger.refresh.timeout_seconds') / 60)
-    ->onFailure(fn () => logger()->error('Scheduled finance ledger refresh failed.'));
-
-Schedule::command('ledger:refresh --all')
-    ->monthlyOn(1, '03:00')
-    ->withoutOverlapping(config('ledger.refresh.timeout_seconds') / 60)
-    ->onFailure(fn () => logger()->error('Scheduled full finance ledger rebuild failed.'));
+// It assumes the external process that loads 0098AFinGLMaster runs during the
+// DAY. That process is not an Agent job on this instance (a search of
+// sysjobsteps for 0098A / GPSWRHA / GL found nothing) and the table is local to
+// FinanceAutomationSystem, so something outside writes it and its window is
+// unconfirmed. If it turns out to run overnight, 21:30 reads before the load
+// lands and the snapshot sits a day behind — sql/FinanceLedgerAgentJob.sql
+// section 5 has the queries that settle it.

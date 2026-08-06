@@ -9,8 +9,12 @@ use Illuminate\Support\Facades\Log;
 /**
  * Rebuilds dbo.FinanceLedgerSnapshot.
  *
- * Driven from Laravel's scheduler rather than SQL Agent, because production's
- * edition is unconfirmed and SQL Server Express has no Agent.
+ * MANUAL RUNS ONLY. The scheduled refresh is the SQL Server Agent job
+ * `SWRHA Finance - Ledger Refresh` (sql/FinanceLedgerAgentJob.sql). An earlier
+ * revision scheduled this command from routes/console.php on the grounds that
+ * production's edition was unconfirmed and Express has no Agent — the instance
+ * is merely NAMED sqlapp\SQLEXPRESS; its edition is Standard 2022 and Agent is
+ * running. Do not re-add a Schedule entry: it would double-schedule the proc.
  *
  * The refresh is year-at-a-time by design: every call pushes a sargable
  * FinancialYear into the source function's CTEs, and closed fiscal years never

@@ -153,13 +153,25 @@ views).
 If you are abandoning the work permanently, those two pages and their controllers should be removed
 or reverted to the scaffold as well.
 
-### Also disable the scheduler
+### Also disable the refresh
 
-Otherwise `ledger:refresh` fails nightly against objects that no longer exist:
+Otherwise the refresh fails nightly against objects that no longer exist:
 
-- Disable or delete the Windows Task Scheduler tasks `SWRHA Finance - Scheduler` and
-  `SWRHA Finance - Ledger Health Check`.
-- Or comment out the two `Schedule::command('ledger:refresh'...)` entries in `routes/console.php`.
+- **On the DB server:** disable or delete the SQL Server Agent job
+  `SWRHA Finance - Ledger Refresh`. This is the one that matters — it is the only thing that
+  actually runs the refresh.
+
+  ```sql
+  EXEC msdb.dbo.sp_update_job @job_name = N'SWRHA Finance - Ledger Refresh', @enabled = 0;
+  ```
+
+- **On the web server:** disable the Windows Task Scheduler task
+  `SWRHA Finance - Ledger Health Check`, which would otherwise alert on a snapshot you deliberately
+  removed.
+
+There is **no** `SWRHA Finance - Scheduler` task and **no** `Schedule::command('ledger:refresh')`
+entry in `routes/console.php` — both were removed when the refresh moved into SQL Agent. If you
+find either on a server, it is a leftover and should be deleted regardless of this rollback.
 
 ### Returning later
 

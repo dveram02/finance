@@ -300,11 +300,20 @@ EXEC dbo.usp_RefreshFinanceLedgerSnapshot @FinancialYear = '2026', @Force = 1;
 
 ## After the cutover
 
-- **Deploy the application.** The current working tree needs `vw_FinanceLedger` to exist, which
-  Step 1 provides.
-- **Set up the scheduler** — `instructionsforschedule.md`. Two Windows Task Scheduler tasks
-  (`SWRHA Finance - Scheduler` and `- Ledger Health Check`), **no queue worker**.
-  Set `FINANCE_LEDGER_REFRESH_TIMEOUT` to at least double whatever Step 3 actually took; the
-  default is now 7200.
+- **Deploy the application** to the web server. The current working tree needs `vw_FinanceLedger`
+  to exist, which Step 1 provides.
+- **Set up the schedule** — `instructionsforschedule.md`. The refresh is a **SQL Server Agent job**
+  (`SWRHA Finance - Ledger Refresh`, daily 21:30) on the DB server. The web server gets **one**
+  Windows Task Scheduler task, `SWRHA Finance - Ledger Health Check`, and **no queue worker**.
+  There is no `SWRHA Finance - Scheduler` task and no `schedule:run` — re-creating one
+  double-schedules the same proc with nothing at the SQL layer to stop the collision.
+- **`FINANCE_LEDGER_REFRESH_TIMEOUT` no longer does anything.** It was the expiry on the
+  `withoutOverlapping()` lock in the deleted Laravel schedule; `config/ledger.php` retains the key
+  only so an existing `.env` entry does not read as a setting that stopped working. Overlap is now
+  prevented by Agent refusing to start a job that is already running.
+- **Confirm the two-box prerequisites** before expecting any of it to work — app and SQL Server are
+  on separate Windows servers, so `SQLSRV_HOST` must be the remote box, TCP 1433 must be open, the
+  ODBC driver must be on the *web* server, and **both clocks must agree**. Step 1b of
+  `instructionsforschedule.md` gates all of it.
 - **Move the daily refresh** to just after the GL load into `0098AFinGLMaster` — still the one
   outstanding unknown.

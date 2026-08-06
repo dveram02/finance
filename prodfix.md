@@ -1,6 +1,18 @@
 # Production Fix Plan — Finance Ledger
 
-**Status: proposal for review. Nothing has been implemented.**
+**Status: implemented, and superseded on scheduling.** This is the design rationale — the
+measurements and the reasoning behind the snapshot are still the authoritative record of *why*.
+
+**Do not follow its Phase 4 (Scheduling).** It predates two decisions that reversed it:
+
+1. The refresh is a **SQL Server Agent job**, not a Laravel schedule. There is no `schedule:run`
+   task, no `withoutOverlapping()` lock, and `FINANCE_LEDGER_REFRESH_TIMEOUT` no longer does
+   anything. Every reference below to raising that timeout, to a 4-hour task limit, or to "the two
+   Windows Task Scheduler tasks" is obsolete.
+2. Production is **two servers** — the app on one Windows box, SQL Server 2022 on another.
+
+For what to actually do: `instructionsforschedule.md` (setup and topology) and
+`prodfix-steps.md` (the rollout). For what was built and measured: `prodfixprogress.md`.
 
 ---
 
@@ -183,23 +195,25 @@ Mostly already done. Remaining:
    not correctness.
 3. Keep `VersionsLedgerCache`, `config/ledger.php` and the filter caches as built.
 
-### Phase 4 — Scheduling
+### Phase 4 — Scheduling ⚠ SUPERSEDED
 
-**Keep the scheduler work** — `ledger:refresh`, `ledger:status`, the health check, the two Windows
-Task Scheduler tasks and `instructionsforschedule.md`. All still required. My earlier plan to
-delete them was wrong.
+> **What was built instead:** the refresh is the SQL Server Agent job
+> `SWRHA Finance - Ledger Refresh` on the DB server, daily at 21:30, one step branching on
+> day-of-month. `ledger:refresh` survives for manual runs only; `ledger:status` and the health
+> check survive unchanged. The Laravel schedule, its per-minute `schedule:run` task and the
+> `withoutOverlapping()` lock are all gone. Overlap is prevented by Agent refusing to start a job
+> already running. See `instructionsforschedule.md`.
 
-Two adjustments:
+Kept for the reasoning and the timings, both of which still hold:
 
 - **Refresh timing** must follow the GL load into `0098AFinGLMaster` (still unknown — §5 Q1).
 - **Full rebuild cost on production is 74–175s per fiscal year.** The organisation-wide query is
   precisely the work the snapshot build does, and it was sampled at both ends of that range. So a
   13-year rebuild is **16–38 minutes** depending on contention.
-  - The 4-hour Task Scheduler limit in `instructionsforschedule.md` remains correct.
-  - **`FINANCE_LEDGER_REFRESH_TIMEOUT` must be raised** from its 1800s (30 min) default — at the
-    slow end the overlap lock would expire mid-rebuild. Set it to **7200** (2 hours) until timed
-    under real conditions.
   - The nightly run touches only the current and prior fiscal year, so it is ~2–6 minutes.
+  - ~~The 4-hour Task Scheduler limit~~ and ~~raising `FINANCE_LEDGER_REFRESH_TIMEOUT` to 7200~~
+    both belonged to the lock on the deleted schedule. Neither applies. The Agent job has no
+    timeout of its own and the config key is retained-but-unused.
 
 ### Phase 5 — Verification on production
 
@@ -224,7 +238,7 @@ Two adjustments:
 | Scheduler stops and nobody notices | `ledger:status` + health-check task already built for exactly this |
 | Refresh collides with Nexus (00:00–03:00) or the GL load | Resolve timings together — see `instructionsforschedule.md` |
 | Concurrency at rollout is worse than expected | Snapshot reads are ~0.03s regardless of breadth, so **the design is insensitive to how many executives there turn out to be** — the open question about user count does not change it |
-| Rebuild runs long enough for the overlap lock to expire | Raise `FINANCE_LEDGER_REFRESH_TIMEOUT` to 7200s; see Phase 4 |
+| ~~Rebuild runs long enough for the overlap lock to expire~~ | **No longer applicable.** There is no overlap lock — Agent will not start a job that is already running |
 
 ---
 
@@ -323,12 +337,16 @@ a source table this application does not own. The ~72 remaining seconds are in t
 `UNION`, the `CROSS APPLY` splitter and the join chain — **still unprofiled, and the correct target
 if refresh cost ever needs reducing.**
 
-### On #5 — raise the timeout, and change the default
+### On #5 — the timeout ⚠ SUPERSEDED
 
-`config/ledger.php` still defaults `FINANCE_LEDGER_REFRESH_TIMEOUT` to **1800s**, and
-`routes/console.php` feeds it to `withoutOverlapping()`. Against a 16–38 minute rebuild the lock
-can expire mid-run. **Change the default to 7200**, not just the production `.env`, so a fresh
-deployment is not born with the wrong value.
+The original concern: `config/ledger.php` defaulted `FINANCE_LEDGER_REFRESH_TIMEOUT` to 1800s and
+`routes/console.php` fed it to `withoutOverlapping()`, so against a 16–38 minute rebuild the lock
+could expire mid-run.
+
+**Moot.** `routes/console.php` no longer schedules anything, so there is no lock to expire. The
+default was raised to 7200 before the move and the key is retained only so an existing production
+`.env` entry does not read as a setting that silently stopped working. It is safe to delete from
+both once the `.env` files are tidied.
 
 ---
 

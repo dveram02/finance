@@ -39,7 +39,7 @@ Record the answers to these, because later steps depend on them:
 
 | Check | What you are looking for | If it differs |
 |---|---|---|
-| CHECK 0 — edition | Any edition is fine | If **Express**: no SQL Agent (already handled — we schedule from Laravel) and a 10 GB database cap. Check headroom before step 4. |
+| CHECK 0 — edition | **Standard.** Confirmed: SQL Server 2022 RTM 16.0.1000.6, `EngineEdition` 2 | The instance is *named* `sqlapp\SQLEXPRESS` but is **not** Express — someone previously read the name as the edition. If a check ever returns `EngineEdition` 4 you are on the wrong instance: real Express has no SQL Agent, and the entire refresh schedule depends on Agent. Also confirm `MachineName` is the **DB** server, not the web server. |
 | CHECK 1/2 — do `dbo.MonthlyExpenditure` and `dbo.vw_BudgetAllocation` execute? | **Both succeed** | If either fails with `Invalid object name '…0030ACOAReports'`, the views were never repointed. Fix that first — you need them working as the reconciliation baseline in step 6. |
 | Reporting tables | `0030AACOAReports`, `0030ABCOAReportlines`, `0030ACCOAReportAccounts` exist | If only the `0030A*` names exist, production is older than the replica. **Stop** and re-check which is canonical. |
 | `varianceLines` row count | 41 rows, 41 **distinct** accounts | If distinct < total, the `INNER JOIN` will fan out and **double money**. Stop. |
@@ -378,31 +378,38 @@ php artisan cache:clear file    # ⚠ the filter caches live on the `file` store
                                 #    `cache:clear` alone will NOT touch them
 ```
 
-Confirm the scheduler is registered (the refresh depends on it):
+Confirm Laravel schedules **nothing** — the refresh is a SQL Server Agent job on the DB server:
 
 ```bash
 php artisan schedule:list
-# expect: ledger:refresh          daily 02:00
-#         ledger:refresh --all    weekly Sunday 03:00
+# expect: no scheduled tasks
 ```
 
-> ⚠ **Registering the schedule is not the same as running it.** Nothing invokes it until you
-> set up a supervisor program or cron entry — and because the production server also hosts
-> **inventory-app** and **cfs**, finance needs **its own** scheduler; theirs will not cover it.
+> ⚠ A `ledger:refresh` entry here is a **defect**, not reassurance. Combined with the Agent job it
+> double-schedules the same stored procedure, and there is no `sp_getapplock` in the procs to stop
+> the collision. Remove it.
 >
-> **Follow `instructionsforschedule.md` now.** Skip it and the snapshot silently goes stale:
-> no error, no warning, pages keep loading fast and the figures just stop moving.
+> **Follow `instructionsforschedule.md` now** to create the Agent job and the health-check task.
+> Skip it and the snapshot silently goes stale: no error, no warning, pages keep loading fast and
+> the figures just stop moving.
 
 Check `.env` while you are there:
 
 ```
-APP_TIMEZONE=America/Port_of_Spain   # without it, "02:00" means 02:00 UTC = 22:00 local
-DB_HOST=<match how this server runs the app>
+APP_TIMEZONE=America/Port_of_Spain
+DB_HOST=localhost                    # MySQL, LOCAL to the web server
+SQLSRV_HOST=<the DB server>          # SQL Server is on a SEPARATE box — never localhost
 ```
 
 `DB_HOST` is `mysql` when running under Docker Compose and `localhost` when running natively —
 both are correct in their own context, so set it to match production's mode rather than
 assuming either value is the "right" one.
+
+`SQLSRV_HOST` is a different matter: production runs the app and SQL Server on **separate Windows
+servers**, so it is always the remote box. If a SQL instance happens to also be installed on the
+web server, `localhost` there connects to it successfully and reads an empty database — no error,
+no data. Step 1b of `instructionsforschedule.md` gates this along with the firewall, ODBC driver
+and clock checks the split introduces.
 
 ---
 
@@ -466,19 +473,22 @@ too, so a SQL rollback alone is usually enough — you do not have to roll both 
 
 ## After rollout
 
-1. **Set up the scheduler if you have not already** — `instructionsforschedule.md`. Nothing
-   else here matters if the refresh never runs.
-2. **Move the nightly refresh** to just after the GL load that populates `0098AFinGLMaster`
-   finishes. It is currently parked at 02:00 with a `TODO` in `routes/console.php`. Until this
-   is done the snapshot may miss a day's postings. Coordinate it with inventory-app's and cfs's
-   overnight jobs at the same time.
+1. **Set up the schedule if you have not already** — `instructionsforschedule.md`: the SQL Agent
+   job on the DB server, and the health-check task on the web server. Nothing else here matters if
+   the refresh never runs.
+2. **Confirm the GL load window** and move the refresh if needed. The job runs at 21:30 on the
+   assumption that whatever populates `0098AFinGLMaster` runs during the business day. If it runs
+   overnight instead, 21:30 reads before it lands and the snapshot sits a full day behind
+   permanently — with `RefreshedAt` advancing normally every night, so nothing looks wrong. See
+   F1 in `instructionsforschedule.md`; the timing lives in the Agent job now, not
+   `routes/console.php`.
 3. **Watch the first few scheduled refreshes:**
    ```sql
    SELECT FinancialYear, RefreshedAt, RowsLoaded, DurationSeconds, Outcome, Message
    FROM dbo.FinanceLedgerRefresh ORDER BY RefreshedAt DESC;
    ```
-   Anything other than `OK`, or a `RefreshedAt` that stops advancing, means the schedule is not
-   running.
+   Anything other than `OK`, or a `RefreshedAt` that stops advancing, means the job is not running.
+   Cross-check `msdb.dbo.sysjobhistory` for the reason.
 4. **Keep the `_Legacy` views** until production has run on the new ones long enough to trust —
    a full month covering a period close is a reasonable bar. Then:
    ```sql

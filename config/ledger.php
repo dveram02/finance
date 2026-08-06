@@ -41,12 +41,18 @@ return [
     | production (that box serves live Access users, so it varies). A full
     | 13-year rebuild is therefore 16-38 minutes.
     |
-    | timeout_seconds is the expiry on the withoutOverlapping() lock in
-    | routes/console.php. It MUST exceed the real duration of `--all`, or the
-    | lock expires mid-rebuild and a second run can start on top of the first.
-    | The old 1800s (30 min) default was below the measured worst case; 7200s
-    | (2 hours) leaves headroom. Erring high is free - the lock is released
-    | normally on completion, and the expiry only matters if a run dies.
+    | recent_years drives `php artisan ledger:refresh` when no --year is given.
+    | It is a MANUAL-RUN setting now: the scheduled refresh moved to the SQL
+    | Server Agent job `SWRHA Finance - Ledger Refresh`, which computes the same
+    | window in T-SQL (@FromYear = current FY - 1). If you change this value,
+    | change the arithmetic in sql/FinanceLedgerAgentJob.sql to match.
+    |
+    | timeout_seconds is RETAINED BUT UNUSED. It was the expiry on the
+    | withoutOverlapping() lock in routes/console.php; that schedule is gone, and
+    | overlap is now prevented by Agent refusing to start a job that is already
+    | running. Kept so an existing FINANCE_LEDGER_REFRESH_TIMEOUT in a
+    | production .env does not read as a setting that stopped working silently.
+    | Safe to delete once the .env files are cleaned up.
     |
     */
 

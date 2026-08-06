@@ -4,10 +4,15 @@
 # Rebuilds the finance ledger snapshot on SQL Server.
 #
 # NOTE: This script is for manual or one-off runs only.
-# The scheduler (run-scheduler.ps1) already runs this automatically:
-#   02:00 daily    ledger:refresh          (current + prior fiscal year)
-#   03:00 Sundays  ledger:refresh --all    (every fiscal year)
+# The scheduled refresh is the SQL Server Agent job 'SWRHA Finance - Ledger
+# Refresh' (sql\FinanceLedgerAgentJob.sql), which runs daily at 21:30 and does
+# the current + prior fiscal year on most days, every fiscal year on the 1st.
 # Under normal operation you never need to run this by hand.
+#
+# This calls `php artisan ledger:refresh`, which EXECs the refresh proc as the
+# `finance` login. If you take the optional hardening step of revoking EXECUTE
+# from that login (see instructionsforschedule.md), this script stops working by
+# design and manual refreshes move to SSMS.
 #
 # Reach for it when:
 #   - doing the initial production build (instructions.md step 4)
@@ -40,7 +45,11 @@ param (
 )
 
 $ProjectRoot = "C:\Apache24\htdocs\production\finance"
-$LogDir      = "$ProjectRoot\storage\logs\scheduler"
+
+# storage\logs\ledger, not storage\logs\scheduler: the scheduler directory
+# belonged to run-scheduler.ps1, which no longer exists. This was the only other
+# writer, so that directory is now dead and can be deleted on the server.
+$LogDir      = "$ProjectRoot\storage\logs\ledger"
 $LogFile     = "$LogDir\refresh-ledger-$(Get-Date -Format 'yyyy-MM-dd').log"
 
 # Ensure log directory exists
