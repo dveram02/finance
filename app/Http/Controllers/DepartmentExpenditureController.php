@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
 use App\Models\FinanceLedger;
 use Illuminate\Http\Request;
@@ -26,6 +27,7 @@ use Inertia\Response;
 class DepartmentExpenditureController extends Controller
 {
     use ResolvesFiscalYear;
+    use ResolvesLedgerAccess;
     use VersionsLedgerCache;
 
     /** Fiscal month columns in period order — PeriodID 1 = Oct … 12 = Sep. */
@@ -46,6 +48,7 @@ class DepartmentExpenditureController extends Controller
             $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
             $filters['fy'] = $activeFiscalYear;
 
+            $hasAccess = $this->userHasLedgerAccess($username);
             $rows = $this->ledgerRows($username, (string) $activeFiscalYear);
         } catch (\Throwable $e) {
             return $this->unavailable($request, $filters, $currentFiscalYear, $e);
@@ -138,6 +141,7 @@ class DepartmentExpenditureController extends Controller
             'activeFiscalYear' => $activeFiscalYear,
             'currentFiscalYear' => $currentFiscalYear,
             'fyNav' => $fyNav,
+            'hasAccess' => $hasAccess,
         ]);
     }
 
@@ -299,6 +303,9 @@ class DepartmentExpenditureController extends Controller
             'activeFiscalYear' => $filters['fy'],
             'currentFiscalYear' => $currentFiscalYear,
             'fyNav' => ['prev' => null, 'next' => null],
+            // True on an outage: we could not run the access probe, so we do not
+            // know, and must not tell the user they have no permissions.
+            'hasAccess' => true,
         ]);
     }
 }

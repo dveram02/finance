@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
 use App\Models\BudgetAllocation;
 use Illuminate\Http\Request;
@@ -15,6 +16,7 @@ use Inertia\Response;
 class BudgetAllocationController extends Controller
 {
     use ResolvesFiscalYear;
+    use ResolvesLedgerAccess;
     use VersionsLedgerCache;
 
     public function index(Request $request): Response
@@ -30,6 +32,8 @@ class BudgetAllocationController extends Controller
         $cacheTtl = config('budget.cache.minutes') * 60;
 
         try {
+            $hasAccess = $this->userHasLedgerAccess($username);
+
             // ── Available fiscal years (all years — drives the FY navigator) ──
             // Cached as a plain array; wrapped in collect() for the FY helpers.
             $years = collect($cache->remember(
@@ -210,11 +214,15 @@ class BudgetAllocationController extends Controller
                 'activeFiscalYear' => $filters['fy'],
                 'currentFiscalYear' => $currentFiscalYear,
                 'fyNav' => ['prev' => null, 'next' => null],
+                // True on an outage: the access probe could not run, so we do not
+                // know, and must not tell the user they have no permissions.
+                'hasAccess' => true,
             ]);
         }
 
         return Inertia::render('Budget/All Budget Allocations', [
             'allocations' => $allocations,
+            'hasAccess' => $hasAccess,
             'clusters' => $clusters,
             'institutions' => $institutions,
             'responsibilities' => $responsibilities,

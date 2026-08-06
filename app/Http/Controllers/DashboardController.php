@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Concerns\DashboardDataTransforms;
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
 use App\Models\BudgetAllocation;
 use App\Models\MonthlyExpenditure;
@@ -17,11 +18,17 @@ class DashboardController extends Controller
 {
     use DashboardDataTransforms;
     use ResolvesFiscalYear;
+    use ResolvesLedgerAccess;
     use VersionsLedgerCache;
 
     public function index(Request $request): Response
     {
         $username = $request->user()->username;
+
+        // Does this user map to any department at all? Without this the page
+        // cannot tell "nothing is assigned to you" from "the source is down",
+        // and the KPI cards claim an outage that is not happening.
+        $hasAccess = $this->hasLedgerAccess($username);
 
         // The budget total drives the Total Budget KPI and the flat "Annual
         // Budget" reference line. It comes from vw_BudgetAllocation (the same
@@ -37,6 +44,7 @@ class DashboardController extends Controller
 
         return Inertia::render('Dashboard', [
             'userName' => $request->user()->name,
+            'hasAccess' => $hasAccess,
             'fiscalYear' => $fiscalYear,
             'totalBudget' => $totalBudget,
             'budgetAvailable' => $budgetAvailable,
@@ -55,6 +63,27 @@ class DashboardController extends Controller
             ),
             'expenditureByCategory' => $expenditure['byCategory'],
         ]);
+    }
+
+    /**
+     * The access probe, defaulting to TRUE when it cannot run.
+     *
+     * "I could not check" must never render as "you have no permissions" — that
+     * sends a user to chase an administrator over what is actually an outage,
+     * which the budget/expenditure states below already report correctly.
+     */
+    private function hasLedgerAccess(string $username): bool
+    {
+        try {
+            return $this->userHasLedgerAccess($username);
+        } catch (\Throwable $e) {
+            Log::warning('Dashboard access probe failed; assuming the user has access.', [
+                'username' => $username,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return true;
+        }
     }
 
     // =========================================================================

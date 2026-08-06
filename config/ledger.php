@@ -37,9 +37,10 @@ return [
     | the current and prior fiscal years often, since closed years never change.
     | The full loop is a separate, rarer schedule.
     |
-    | Measured build cost for ONE fiscal year: ~93s on the replica, 74-175s on
-    | production (that box serves live Access users, so it varies). A full
-    | 13-year rebuild is therefore 16-38 minutes.
+    | Measured build cost for ONE fiscal year, from dbo.FinanceLedgerRefresh on
+    | PRODUCTION (2026-08-05): 102-256s, ~230s for a recent year. The whole
+    | 13-year loop logged 2,595s — roughly 43 minutes, not the 16-38 estimated
+    | from the replica. The nightly current+prior-FY run costs ~8 minutes.
     |
     | recent_years drives `php artisan ledger:refresh` when no --year is given.
     | It is a MANUAL-RUN setting now: the scheduled refresh moved to the SQL

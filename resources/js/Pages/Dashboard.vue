@@ -28,10 +28,15 @@ ChartJS.register(
   Filler,
 )
 
+import NoAccessNotice from '@/Components/NoAccessNotice.vue'
+
 const { isDark } = useDarkMode()
 
 const props = defineProps({
   userName: String,
+  // False when the user maps to no department at all. Distinct from the
+  // *Available flags: nothing is broken, so the copy must not say it is.
+  hasAccess: { type: Boolean, default: true },
   fiscalYear: Number,
   totalBudget: Number,
   budgetAvailable: { type: Boolean, default: true },
@@ -82,6 +87,7 @@ const utilizationColor = computed(() => {
 // Budget Usage needs both a numerator (expenditure) and a denominator (budget).
 const usageAvailable = computed(() => props.budgetAvailable && props.expenditureAvailable)
 const usageSubLabel = computed(() => {
+  if (!props.hasAccess) return 'Department access is not configured'
   if (!props.budgetAvailable) return 'Awaiting budget data'
   if (!props.expenditureAvailable) return 'Awaiting expenditure data'
   if (totalExpenditure.value < 0) return 'Net credits exceed expenditure'
@@ -91,6 +97,7 @@ const usageSubLabel = computed(() => {
 
 // ── Per-chart empty / not-started states ───────────────────────────────────────
 const expenditureChartState = (hasData) => {
+  if (!props.hasAccess) return { empty: true, msg: 'Department access is not configured' }
   if (!props.expenditureWindowStarted) return { empty: true, msg: 'Fiscal year has not started' }
   if (!props.expenditureAvailable) return { empty: true, msg: 'Expenditure data unavailable' }
   if (!hasData) return { empty: true, msg: 'No expenditure recorded yet' }
@@ -100,6 +107,7 @@ const expenditureChartState = (hasData) => {
 const monthlyState = computed(() => expenditureChartState((props.monthlyExpenditure?.labels?.length ?? 0) > 0))
 const categoryState = computed(() => expenditureChartState((props.expenditureByCategory?.labels?.length ?? 0) > 0))
 const burnupState = computed(() => {
+  if (!props.hasAccess) return { empty: true, msg: 'Department access is not configured' }
   if (!props.expenditureWindowStarted) return { empty: true, msg: 'Fiscal year has not started' }
   if (!(props.budgetVsActual?.datasets?.length)) return { empty: true, msg: 'No data available' }
   return { empty: false, msg: '' }
@@ -311,6 +319,8 @@ const categoryBarOptions = computed(() => ({
       </div>
     </div>
 
+    <NoAccessNotice v-if="!hasAccess" />
+
     <!-- KPI cards -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
@@ -332,6 +342,10 @@ const categoryBarOptions = computed(() => ({
           <template v-if="budgetAvailable">
             <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
             <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
+          </template>
+          <template v-else-if="!hasAccess">
+            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not assigned</p>
+            <p class="text-[10px] text-tx-subtle mt-1">Department access is not configured.</p>
           </template>
           <template v-else>
             <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Budget data unavailable</p>
@@ -387,6 +401,10 @@ const categoryBarOptions = computed(() => ({
           <template v-if="expenditureAvailable">
             <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
             <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
+          </template>
+          <template v-else-if="!hasAccess">
+            <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Not assigned</p>
+            <p class="text-[10px] text-tx-subtle mt-1">Department access is not configured.</p>
           </template>
           <template v-else>
             <p class="font-display text-base font-semibold text-tx-muted leading-tight mt-2">Expenditure unavailable</p>

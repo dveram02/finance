@@ -43,11 +43,13 @@ Artisan::command('inspire', function () {
 // keep the PREVIOUS snapshot when a build looks wrong, so a linked-server blip
 // on the 1st means executives read last month's numbers for a month, and only
 // the health check would notice. Daily turns that single point of failure into
-// ~30 chances, and costs ~2-6 minutes a night because it rebuilds only the
-// current and prior fiscal year.
+// ~30 chances, and costs ~8 minutes a night because it rebuilds only the
+// current and prior fiscal year (measured on production 2026-08-05: FY2025
+// 256s + FY2026 229s).
 //
-// The 16-38 minute figure is the full 13-year loop, which runs monthly because
-// closed fiscal years genuinely never change.
+// The full 13-year loop, which runs monthly because closed fiscal years
+// genuinely never change, logged 2,595s — about 43 minutes. Earlier revisions
+// of this comment said 16-38 minutes; that was extrapolated from the replica.
 //
 // NOTE: encumbrances are SNAPSHOTTED, not live (see dbo.vw_FinanceLedger).
 // An earlier revision read them live so allocation balances were accurate

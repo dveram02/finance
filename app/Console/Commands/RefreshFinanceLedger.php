@@ -96,7 +96,8 @@ class RefreshFinanceLedger extends Command
 
     private function refreshAll(int $force): int
     {
-        $this->line('Refreshing every fiscal year — this takes roughly 90-110 seconds per year.');
+        // Measured on production 2026-08-05: 102-256s per year, 2,595s for all 13.
+        $this->line('Refreshing every fiscal year — roughly 3-4 minutes per year, ~45 minutes in total.');
 
         DB::connection('FinanceAutomationSystem')
             ->statement('EXEC dbo.usp_RefreshFinanceLedgerSnapshotAll @Force = ?', [$force]);

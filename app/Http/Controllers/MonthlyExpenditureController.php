@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\ResolvesFiscalYear;
+use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
 use App\Models\MonthlyExpenditure;
 use Illuminate\Http\Request;
@@ -15,6 +16,7 @@ use Inertia\Response;
 class MonthlyExpenditureController extends Controller
 {
     use ResolvesFiscalYear;
+    use ResolvesLedgerAccess;
     use VersionsLedgerCache;
 
     public function index(Request $request): Response
@@ -30,6 +32,8 @@ class MonthlyExpenditureController extends Controller
         $cacheTtl = config('expenditure.cache.minutes') * 60;
 
         try {
+            $hasAccess = $this->userHasLedgerAccess($username);
+
             // ── Available fiscal years (all years — drives the FY navigator) ──
             $years = collect($cache->remember(
                 $this->ledgerCacheKey("monthly-expenditure:years:{$username}"),
@@ -246,11 +250,15 @@ class MonthlyExpenditureController extends Controller
                 'activeFiscalYear' => $filters['fy'],
                 'currentFiscalYear' => $currentFiscalYear,
                 'fyNav' => ['prev' => null, 'next' => null],
+                // True on an outage: the access probe could not run, so we do not
+                // know, and must not tell the user they have no permissions.
+                'hasAccess' => true,
             ]);
         }
 
         return Inertia::render('Expenditure/Monthly Expenditure', [
             'rows' => $rows,
+            'hasAccess' => $hasAccess,
             'clusters' => $clusters,
             'institutions' => $institutions,
             'responsibilities' => $responsibilities,

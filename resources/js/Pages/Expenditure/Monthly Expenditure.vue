@@ -1,8 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
+import NoAccessNotice from '@/Components/NoAccessNotice.vue'
 
 const props = defineProps({
+    // False when the user maps to no department at all — a permanent state that
+    // no retry or filter change fixes, so it must not read as "no results".
+    hasAccess: { type: Boolean, default: true },
     rows:              Object,
     clusters:          Array,
     institutions:      Array,
@@ -160,6 +164,8 @@ const subGroupLine = (row) =>
     <Head title="Monthly Expenditure" />
 
     <div class="space-y-6">
+
+        <NoAccessNotice v-if="!hasAccess" />
 
         <!-- ════════════════════════════ Flash messages ═══════════════════════════ -->
         <div v-if="$page.props.flash?.success"
@@ -465,8 +471,10 @@ const subGroupLine = (row) =>
                                 <div class="inline-grid place-items-center h-14 w-14 rounded-full bg-surface-3 mb-3">
                                     <i class="fas fa-folder-open text-xl text-tx-muted"></i>
                                 </div>
-                                <p class="text-sm font-medium text-tx-body">No expenditure found</p>
-                                <p class="text-xs text-tx-muted mt-1">
+                                <p class="text-sm font-medium text-tx-body">
+                                    {{ hasAccess ? 'No expenditure found' : 'Department access is not configured' }}
+                                </p>
+                                <p v-if="hasAccess" class="text-xs text-tx-muted mt-1">
                                     Nothing in <span class="font-semibold">FY {{ activeFiscalYear }}</span>
                                     <template v-if="activeFilterCount"> matching your filters</template>.
                                 </p>
