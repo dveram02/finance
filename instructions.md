@@ -1,3 +1,9 @@
+> **NOTE (2026-08-25):** every linked-server prerequisite in this runbook is **OBSOLETE 2026-08-25**.
+> `fn_FinanceLedgerSource` now reads the local chart of accounts (`0030ADGPCOA` +
+> `0030AEAccountNameCorrections`) and does not touch `[GPSWRHA.SWRHA.CO.TT]` at all, so the
+> linked-server connectivity and login-mapping gates no longer guard anything. Skip them.
+> Everything else in this document still applies.
+
 # Production Rollout — Finance Unified Ledger
 
 Step-by-step procedure for applying the unified ledger migration to production.

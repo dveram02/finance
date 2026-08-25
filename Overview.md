@@ -57,8 +57,8 @@ For a single account in a single fiscal year:
 | `Q1`–`Q4` | Quarter totals | Oct+Nov+Dec, Jan+Feb+Mar, Apr+May+Jun, Jul+Aug+Sep |
 | `YTDTotal` | Year-to-date posted spend | Sum of all 12 month columns |
 | `Allocation` | Approved budget | `SUM(Allocation)` from `0040CBudgetsAllocation` for that FY |
-| `Approved` | Committed — approved requisitions | `SUM(ExtendedCost)` where requisition `Status IN ('AP','PO')` |
-| `Routing` | Committed — in-flight requisitions | `SUM(ExtendedCost)` where `Status IN ('RT','HD','PN')` |
+| `Approved` | Committed — approved requisitions, **net of goods received** | `SUM((Quantity - QtyShipped) * UnitCost)` where `Status IN ('AP','PO')`, floored at zero |
+| `Routing` | Committed — in-flight requisitions, **net of goods received** | `SUM((Quantity - QtyShipped) * UnitCost)` where `Status IN ('RT','HD','PN')`, floored at zero. Displayed only — does not reduce the allocation balance |
 | `ClusterName`, `InstitutionName`, `ResponsibilityName`, `DepartmentName` | Labels | Parsed out of the account number's segments, then named from the segment tables |
 | `MainGroup`, `SubGroupA`, `SubGroupB` | Category | Split out of the reporting line description (`A : B : C`) |
 

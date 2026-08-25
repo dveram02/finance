@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Concerns\DerivesAllocationLines;
 use App\Concerns\ResolvesFiscalYear;
 use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
@@ -18,14 +19,25 @@ use Inertia\Response;
  * Allocation Line Expenditure — allocation against actual spend, per account
  * line, for a fiscal year.
  *
- * Reads dbo.vw_FinanceLedger, which computes Excess and AllocationBalance
- * against ActualExpenditure (YTD + Approved + Routing) rather than YTD alone —
- * money that is committed on an approved or routing requisition is no longer
- * available to spend, so counting only posted GL activity would overstate the
- * headroom on every line that has an open commitment.
+ * Reads dbo.vw_FinanceLedger. Since 2026-08-25 the allocation rule is:
+ *
+ *     ActualExpenditure = YTDTotal + Approved
+ *     Excess            = MAX(0, YTDTotal - Allocation)
+ *     AllocationBalance = MAX(0, Allocation - YTDTotal)
+ *
+ * so the balance is measured against POSTED GL SPEND alone. Approved is shown
+ * and counted into the reported "actual" but does not reduce the balance;
+ * Routing does neither and is carried for information. The page therefore
+ * reconciles on screen — Allocation minus YTD Expenditure IS the balance — and
+ * the Vue table says so in a tooltip, because a user who sees a larger "actual"
+ * beside an unreduced balance will otherwise assume the page is broken.
+ *
+ * The arithmetic itself lives in DerivesAllocationLines so it can be unit
+ * tested without SQL Server; see financesqlupdate.md to revert the rule.
  */
 class AllocationLineExpenditureController extends Controller
 {
+    use DerivesAllocationLines;
     use ResolvesFiscalYear;
     use ResolvesLedgerAccess;
     use VersionsLedgerCache;
@@ -111,32 +123,13 @@ class AllocationLineExpenditureController extends Controller
         // ── Totals over the whole filtered set, before pagination ────────────────
         // A totals row that only summed the visible page would look authoritative
         // and be wrong.
-        $monthTotals = [];
-        foreach (self::MONTHS as $month) {
-            $monthTotals[$month] = round((float) $filtered->sum($month), 2);
-        }
-
-        $totalAllocation = round((float) $filtered->sum('Allocation'), 2);
-        $totalYtd = round((float) $filtered->sum('YTDTotal'), 2);
-        $exceededCount = $filtered->where('StatusKey', 'over')->count();
-
-        $totals = [
-            'allocation' => $totalAllocation,
-            'months' => $monthTotals,
-            'encumbered' => round((float) $filtered->sum('Encumbered'), 2),
-            'ytd' => $totalYtd,
-            // Summed per line, not derived from the totals: an account that has
-            // overspent contributes zero balance, and netting it against another
-            // account's headroom would overstate what is actually available.
-            'balance' => round((float) $filtered->sum('AllocationBalance'), 2),
-            'exceededCount' => $exceededCount,
-        ];
+        $totals = $this->allocationTotals($filtered, self::MONTHS);
 
         $stats = [
-            'totalAllocation' => $totalAllocation,
-            'totalExpenditure' => $totalYtd,
+            'totalAllocation' => $totals['allocation'],
+            'totalExpenditure' => $totals['ytd'],
             'balance' => $totals['balance'],
-            'exceededCount' => $exceededCount,
+            'exceededCount' => $totals['exceededCount'],
             'accountCount' => $filtered->count(),
         ];
 
@@ -201,11 +194,6 @@ class AllocationLineExpenditureController extends Controller
             self::MONTHS,
         );
 
-        $numeric = array_merge(
-            ['Allocation', 'Approved', 'Routing', 'YTDTotal', 'ActualExpenditure', 'Excess', 'AllocationBalance'],
-            self::MONTHS,
-        );
-
         return FinanceLedger::forUser($username)
             ->forYear($fiscalYear)
             ->select($columns)
@@ -214,51 +202,9 @@ class AllocationLineExpenditureController extends Controller
             ->orderBy('DepartmentName')
             ->orderBy('AccountNumber')
             ->get()
-            ->map(function ($row) use ($columns, $numeric) {
-                $out = [];
-                foreach ($columns as $column) {
-                    $out[$column] = in_array($column, $numeric, true)
-                        ? (float) $row->{$column}
-                        : $row->{$column};
-                }
-
-                // The page shows one Encumbered column; the ledger splits the
-                // commitment into approved (AP + PO) and routing (RT + HD + PN).
-                $out['Encumbered'] = round($out['Approved'] + $out['Routing'], 2);
-
-                [$out['StatusKey'], $out['StatusAmount']] = $this->classify($out['Excess'], $out['AllocationBalance']);
-
-                return $out;
-            });
-    }
-
-    // =========================================================================
-    // Allocation outcome — the rule the page exists to show
-    // =========================================================================
-
-    /**
-     * Classify a line from the ledger's Excess / AllocationBalance pair.
-     *
-     * The view already floors the balance at zero and reports any overspend
-     * separately as Excess, so exactly one of the two can be non-zero. Doing
-     * the classification from those columns keeps the rule single-sourced in
-     * SQL rather than restating the arithmetic here.
-     *
-     * @return array{0:string,1:float}
-     */
-    private function classify(float $excess, float $balance): array
-    {
-        // Both sides are rounded money, but comparing floats for exact equality
-        // is still unsafe — half a cent of tolerance decides "fully spent".
-        if ($excess >= 0.005) {
-            return ['over', round($excess, 2)];
-        }
-
-        if ($balance >= 0.005) {
-            return ['under', round($balance, 2)];
-        }
-
-        return ['exact', 0.0];
+            ->map(fn ($row) => $this->deriveAllocationLine(
+                (array) $row->getAttributes(), $columns, self::MONTHS
+            ));
     }
 
     // =========================================================================
@@ -342,14 +288,10 @@ class AllocationLineExpenditureController extends Controller
                 'exceededCount' => 0,
                 'accountCount' => 0,
             ],
-            'totals' => [
-                'allocation' => 0,
-                'months' => array_fill_keys(self::MONTHS, 0),
-                'encumbered' => 0,
-                'ytd' => 0,
-                'balance' => 0,
-                'exceededCount' => 0,
-            ],
+            // Same key set as the success path, zeroed — asserted by the unit
+            // suite, because a prop present on one path and missing on the
+            // other is a Vue error stacked on top of an outage.
+            'totals' => $this->emptyAllocationTotals(self::MONTHS),
             'filters' => $filters,
             'activeFiscalYear' => $filters['fy'],
             'currentFiscalYear' => $currentFiscalYear,

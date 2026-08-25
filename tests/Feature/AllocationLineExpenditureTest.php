@@ -16,11 +16,17 @@ use Tests\TestCase;
  * middleware reaches the separate auth SQL Server.
  *
  * The balance and status rules are the reason this page exists, so they are
- * asserted directly rather than only through the rendered contract. Note the
- * rule is stated against ActualExpenditure (YTD + Approved + Routing), NOT YTD
- * alone: money committed on an approved or routing requisition is no longer
- * available to spend, so measuring against posted GL activity alone would
- * overstate the headroom on every line with an open commitment.
+ * asserted directly rather than only through the rendered contract.
+ *
+ * THE RULE (changed 2026-08-25):
+ *     ActualExpenditure = YTDTotal + Approved
+ *     Excess            = MAX(0, YTDTotal - Allocation)
+ *     AllocationBalance = MAX(0, Allocation - YTDTotal)
+ *
+ * The balance is measured against POSTED GL SPEND alone. Approved is counted
+ * into the reported actual but does not reduce the balance; Routing does
+ * neither. These assertions verify the SQL view's own output — the PHP-side
+ * arithmetic has its own offline suite in tests/Unit/DerivesAllocationLinesTest.
  */
 class AllocationLineExpenditureTest extends TestCase
 {
@@ -70,8 +76,10 @@ class AllocationLineExpenditureTest extends TestCase
                 ->has('stats.exceededCount')
                 ->has('totals.months', 12)
                 ->has('totals.allocation')
-                ->has('totals.encumbered')
                 ->has('totals.ytd')
+                ->has('totals.approved')
+                ->has('totals.routing')
+                ->has('totals.actual')
                 ->has('totals.balance')
             );
     }
@@ -106,23 +114,23 @@ class AllocationLineExpenditureTest extends TestCase
         }
     }
 
-    public function test_encumbered_is_approved_plus_routing(): void
+    public function test_approved_and_routing_are_carried_separately(): void
     {
+        // They are no longer interchangeable: Approved counts into
+        // ActualExpenditure, Routing counts into nothing. The single combined
+        // "Encumbered" column they used to be summed into is gone.
         foreach ($this->allRows() as $row) {
-            $this->assertEqualsWithDelta(
-                (float) $row['Approved'] + (float) $row['Routing'],
-                (float) $row['Encumbered'],
-                0.01,
-                "Encumbered does not equal Approved + Routing for {$row['AccountNumber']}."
-            );
+            $this->assertArrayHasKey('Approved', $row);
+            $this->assertArrayHasKey('Routing', $row);
+            $this->assertArrayNotHasKey('Encumbered', $row);
         }
     }
 
-    public function test_actual_expenditure_is_ytd_plus_the_encumbered_commitment(): void
+    public function test_actual_expenditure_is_ytd_plus_approved_only(): void
     {
         foreach ($this->allRows() as $row) {
             $this->assertEqualsWithDelta(
-                (float) $row['YTDTotal'] + (float) $row['Approved'] + (float) $row['Routing'],
+                (float) $row['YTDTotal'] + (float) $row['Approved'],
                 (float) $row['ActualExpenditure'],
                 0.01,
                 "ActualExpenditure does not reconcile for {$row['AccountNumber']}."
@@ -130,11 +138,41 @@ class AllocationLineExpenditureTest extends TestCase
         }
     }
 
-    public function test_balance_is_allocation_less_actual_expenditure_and_never_negative(): void
+    public function test_routing_does_not_affect_any_derived_figure(): void
+    {
+        // The guard against a silent revert to the old rule: if Routing were
+        // deducted again, a line with non-zero Routing would fail here.
+        $sawRouting = false;
+
+        foreach ($this->allRows() as $row) {
+            if ((float) $row['Routing'] <= 0.0) {
+                continue;
+            }
+
+            $sawRouting = true;
+            $allocation = (float) $row['Allocation'];
+            $ytd = (float) $row['YTDTotal'];
+
+            $this->assertEqualsWithDelta(
+                $ytd + (float) $row['Approved'], (float) $row['ActualExpenditure'], 0.01,
+                "Routing leaked into ActualExpenditure for {$row['AccountNumber']}."
+            );
+            $this->assertEqualsWithDelta(
+                max(0.0, round($allocation - $ytd, 2)), (float) $row['AllocationBalance'], 0.01,
+                "Routing reduced the balance for {$row['AccountNumber']}."
+            );
+        }
+
+        if (! $sawRouting) {
+            $this->markTestSkipped('No line in this snapshot carries a routing commitment.');
+        }
+    }
+
+    public function test_balance_is_allocation_less_ytd_and_never_negative(): void
     {
         foreach ($this->allRows() as $row) {
             $allocation = (float) $row['Allocation'];
-            $actual = (float) $row['ActualExpenditure'];
+            $actual = (float) $row['YTDTotal'];
             $balance = (float) $row['AllocationBalance'];
 
             $this->assertGreaterThanOrEqual(
@@ -154,7 +192,7 @@ class AllocationLineExpenditureTest extends TestCase
     public function test_status_classifies_each_line_against_its_allocation(): void
     {
         foreach ($this->allRows() as $row) {
-            $delta = round((float) $row['ActualExpenditure'] - (float) $row['Allocation'], 2);
+            $delta = round((float) $row['YTDTotal'] - (float) $row['Allocation'], 2);
 
             if (abs($delta) < 0.005) {
                 $this->assertSame('exact', $row['StatusKey'], "Equal spend should read as exact for {$row['AccountNumber']}.");
@@ -186,7 +224,12 @@ class AllocationLineExpenditureTest extends TestCase
         $props = $this->visit()->viewData('page')['props'];
         $all = $this->allRows();
 
-        foreach (['Allocation' => 'allocation', 'Encumbered' => 'encumbered', 'YTDTotal' => 'ytd', 'AllocationBalance' => 'balance'] as $rowKey => $totalKey) {
+        $map = [
+            'Allocation' => 'allocation', 'YTDTotal' => 'ytd', 'Approved' => 'approved',
+            'Routing' => 'routing', 'ActualExpenditure' => 'actual', 'AllocationBalance' => 'balance',
+        ];
+
+        foreach ($map as $rowKey => $totalKey) {
             $this->assertEqualsWithDelta(
                 array_sum(array_map('floatval', array_column($all, $rowKey))),
                 (float) $props['totals'][$totalKey],

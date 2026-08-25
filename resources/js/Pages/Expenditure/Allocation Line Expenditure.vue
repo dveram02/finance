@@ -456,13 +456,24 @@ const statusTitle = (row) => {
                             </th>
 
                             <th class="summary-edge px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
-                                Encumbered
-                            </th>
-                            <th class="px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
                                 YTD Expenditure
                             </th>
-                            <th class="px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
+                            <th class="px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap"
+                                title="Approved requisitions (AP + PO), net of goods already received. Counted in YTD + Approved; does not reduce Balance of Allocation.">
+                                Approved
+                            </th>
+                            <th class="px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap"
+                                title="Requisitions still routing (RT + HD + PN). Shown for information only: not counted in YTD + Approved and does not reduce Balance of Allocation.">
+                                Routing
+                            </th>
+                            <th class="px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap"
+                                title="Posted GL expenditure plus approved commitments.">
+                                YTD + Approved
+                            </th>
+                            <th class="px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap"
+                                title="Allocation minus YTD Expenditure. Approved and Routing are shown for information and do not reduce this balance.">
                                 Balance of Allocation
+                                <i class="fas fa-circle-info ml-1 opacity-60"></i>
                             </th>
                             <th class="col-status ledger-frz ledger-edge-r px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
                                 Status
@@ -473,7 +484,7 @@ const statusTitle = (row) => {
                     <tbody class="divide-y divide-line">
 
                         <tr v-if="rows.data.length === 0">
-                            <td :colspan="months.length + 8" class="px-4 py-16 text-center">
+                            <td :colspan="months.length + 10" class="px-4 py-16 text-center">
                                 <div class="inline-grid place-items-center h-14 w-14 rounded-full bg-surface-3 mb-3">
                                     <i class="fas fa-folder-open text-xl text-tx-muted"></i>
                                 </div>
@@ -529,18 +540,33 @@ const statusTitle = (row) => {
                             </td>
 
                             <td :class="[
-                                    'summary-edge px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums align-top',
-                                    isZero(row.Encumbered) ? 'text-tx-muted/40' : 'text-tx-body',
-                                ]">
-                                <template v-if="isZero(row.Encumbered)">–</template>
-                                <template v-else>{{ formatAmount(row.Encumbered) }}</template>
-                            </td>
-
-                            <td :class="[
-                                    'px-3 py-3 text-[13px] text-right whitespace-nowrap font-semibold tabular-nums align-top',
+                                    'summary-edge px-3 py-3 text-[13px] text-right whitespace-nowrap font-semibold tabular-nums align-top',
                                     isNegative(row.YTDTotal) ? 'text-red-600 dark:text-red-400' : 'text-tx-primary',
                                 ]">
                                 {{ formatAmount(row.YTDTotal) }}
+                            </td>
+
+                            <td :class="[
+                                    'px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums align-top',
+                                    isZero(row.Approved) ? 'text-tx-muted/40' : 'text-tx-body',
+                                ]">
+                                <template v-if="isZero(row.Approved)">–</template>
+                                <template v-else>{{ formatAmount(row.Approved) }}</template>
+                            </td>
+
+                            <td :class="[
+                                    'px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums align-top',
+                                    isZero(row.Routing) ? 'text-tx-muted/40' : 'text-tx-body',
+                                ]">
+                                <template v-if="isZero(row.Routing)">–</template>
+                                <template v-else>{{ formatAmount(row.Routing) }}</template>
+                            </td>
+
+                            <td :class="[
+                                    'px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums align-top',
+                                    isNegative(row.ActualExpenditure) ? 'text-red-600 dark:text-red-400' : 'text-tx-body',
+                                ]">
+                                {{ formatAmount(row.ActualExpenditure) }}
                             </td>
 
                             <td :class="[
@@ -592,11 +618,17 @@ const statusTitle = (row) => {
                                 <template v-else>{{ formatAmount(totals.months[m.key]) }}</template>
                             </td>
 
-                            <td class="summary-edge px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-semibold text-tx-primary">
-                                {{ formatAmount(totals.encumbered) }}
-                            </td>
-                            <td class="px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-bold text-tx-primary">
+                            <td class="summary-edge px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-bold text-tx-primary">
                                 {{ formatAmount(totals.ytd) }}
+                            </td>
+                            <td class="px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-semibold text-tx-primary">
+                                {{ formatAmount(totals.approved) }}
+                            </td>
+                            <td class="px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-semibold text-tx-primary">
+                                {{ formatAmount(totals.routing) }}
+                            </td>
+                            <td class="px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-semibold text-tx-primary">
+                                {{ formatAmount(totals.actual) }}
                             </td>
                             <td class="px-3 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-bold text-emerald-700 dark:text-emerald-400">
                                 {{ formatAmount(totals.balance) }}
@@ -647,7 +679,7 @@ const statusTitle = (row) => {
    Only this page's column layout lives here; the table mechanics are shared in
    app.css. Twenty columns, so the identity block matches Department Expenditure
    exactly — the two pages must feel like the same instrument — and only Status
-   is frozen on the right. Freezing the whole summary block (Encumbered, YTD,
+   is frozen on the right. Freezing the whole summary block (YTD, Approved,
    Balance, Status) would pin ~32rem and leave almost no room for the months;
    Status is the column people scan, so it is the one worth the space. */
 

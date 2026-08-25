@@ -57,6 +57,18 @@ GO
 
 
 /* ===========================================================================
+   SECTION 2 — OBSOLETE since 2026-08-25: linked server login mapping
+   ---------------------------------------------------------------------------
+   *** THIS GATE NO LONGER APPLIES. SKIP IT. ***
+
+   fn_FinanceLedgerSource was rewritten to read the chart of accounts from the
+   LOCAL mirror (0030ADGPCOA + 0030AEAccountNameCorrections). It no longer
+   touches [GPSWRHA.SWRHA.CO.TT] at all, so the Agent service account needs no
+   linked-server login mapping, and the failure this gate existed to prevent
+   cannot occur. Retained so the runbook's step numbering still resolves.
+
+   The ORIGINAL gate text follows, for reference only.
+   ---------------------------------------------------------------------------
    SECTION 2 — GATE: linked server login mapping   [runbook step 3]
    ---------------------------------------------------------------------------
    fn_FinanceLedgerSource reads [GPSWRHA.SWRHA.CO.TT].[SWRHA].[dbo].[GL40200]
@@ -196,7 +208,7 @@ EXEC msdb.dbo.sp_add_jobstep
     @subsystem  = N'TSQL',
     @database_name = N'FinanceAutomationSystem',
     @retry_attempts = 2,
-    @retry_interval = 20,          -- minutes; rides out a linked-server blip
+    @retry_interval = 20,          -- minutes; retained for transient DB errors
     @on_success_action = 1,        -- quit reporting success
     @on_fail_action    = 2,        -- quit reporting failure
     @command = N'

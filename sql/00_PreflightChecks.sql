@@ -335,3 +335,168 @@ GO
 
 PRINT '=== Pre-flight complete. CHECK 1, 2, 4 and 6 are the decision-makers. ===';
 GO
+
+/* ===========================================================================
+   CHECKS 12-20  Added 2026-08-25 for the Allocation Oversight rollout.
+   ---------------------------------------------------------------------------
+   Run ALL of these against the target instance immediately before deploying.
+   A restored backup is never authoritative for a live release: the
+   InstitutionID column in CHECK 18 appeared between two backups taken three
+   weeks apart, and the plan was rewritten twice as a result.
+
+   Baselines below were measured on the 2026-08-25 production backup. They are
+   OBSERVATIONS, not invariants - re-measure, never quote.
+   =========================================================================== */
+
+/* CHECK 12  COA grain. BLOCKING - a duplicate account number multiplies every
+             money column through the coaData join.
+             Baseline: 9,463 rows / 9,463 distinct / 0 duplicates. */
+SELECT
+    'CHECK 12: COA grain' AS check_name,
+    COUNT(*)                                             AS rows_total,
+    COUNT(DISTINCT UPPER(LTRIM(RTRIM(AccountNumber))))   AS distinct_accounts,
+    (SELECT COUNT(*) FROM (
+        SELECT 1 AS x FROM dbo.[0030ADGPCOA]
+        GROUP BY UPPER(LTRIM(RTRIM(AccountNumber))) HAVING COUNT(*) > 1) AS d) AS duplicates
+FROM dbo.[0030ADGPCOA];
+GO
+
+/* CHECK 13  Correction grain. BLOCKING - SELECT DISTINCT does NOT collapse an
+             account whose rows disagree on the description.
+             Baseline: 190 rows / 168 accounts / 0 conflicts. Duplicates exist
+             but every duplicate set agrees, so the collapse is lossless. */
+SELECT
+    'CHECK 13: correction grain' AS check_name,
+    COUNT(*)                        AS rows_total,
+    COUNT(DISTINCT AccountNumber)   AS distinct_accounts,
+    (SELECT COUNT(*) FROM (
+        SELECT 1 AS x FROM dbo.[0030AEAccountNameCorrections]
+        GROUP BY UPPER(LTRIM(RTRIM(AccountNumber)))
+        HAVING COUNT(DISTINCT UPPER(COALESCE(
+            NULLIF(LTRIM(RTRIM(EditedAccountDescription)), ''),
+            NULLIF(LTRIM(RTRIM(AccountDescription)), '')))) > 1) AS d) AS conflicts
+FROM dbo.[0030AEAccountNameCorrections];
+GO
+
+/* CHECK 14  Label coverage. The entire linked-server removal rests on these
+             four columns existing and being populated. If they were all NULL
+             the money would stay perfect while every page filled with
+             UNDEFINED - which no money gate can detect. That is why gate 4b
+             exists in the refresh proc.
+             Baseline: 0 blank in all five; 24 DepartmentName and 1
+             ResponsibilityName carry REMOVE/UNDEFINED sentinels. */
+SELECT
+    'CHECK 14: COA label coverage' AS check_name,
+    COUNT(*) AS rows_total,
+    SUM(CASE WHEN NULLIF(LTRIM(RTRIM(Cluster)), '')            IS NULL THEN 1 ELSE 0 END) AS blank_cluster,
+    SUM(CASE WHEN NULLIF(LTRIM(RTRIM(InstitutionName)), '')    IS NULL THEN 1 ELSE 0 END) AS blank_institution,
+    SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ResponsibilityName)), '') IS NULL THEN 1 ELSE 0 END) AS blank_responsibility,
+    SUM(CASE WHEN NULLIF(LTRIM(RTRIM(DepartmentName)), '')     IS NULL THEN 1 ELSE 0 END) AS blank_department,
+    SUM(CASE WHEN NULLIF(LTRIM(RTRIM(AccountDescription)), '') IS NULL THEN 1 ELSE 0 END) AS blank_description,
+    SUM(CASE WHEN UPPER(LTRIM(RTRIM(DepartmentName))) IN ('REMOVE','UNDEFINED') THEN 1 ELSE 0 END) AS sentinel_department
+FROM dbo.[0030ADGPCOA];
+GO
+
+/* CHECK 15  Segment-name ambiguity. coaData matches on the FULL account
+             number, with a segment-level fallback behind it for accounts
+             absent from the mirror entirely (2 of 2,236 in FY2026). That
+             fallback is only safe while each segment maps to exactly one name.
+             Baseline: 0 / 0 / 0. */
+SELECT 'CHECK 15: segment ambiguity' AS check_name,
+    (SELECT COUNT(*) FROM (SELECT AccountSegment5 FROM dbo.[0030ADGPCOA]
+        WHERE NULLIF(LTRIM(RTRIM(DepartmentName)), '') IS NOT NULL
+        GROUP BY AccountSegment5 HAVING COUNT(DISTINCT DepartmentName) > 1) AS d) AS ambiguous_department,
+    (SELECT COUNT(*) FROM (SELECT AccountSegment4 FROM dbo.[0030ADGPCOA]
+        WHERE NULLIF(LTRIM(RTRIM(ResponsibilityName)), '') IS NOT NULL
+        GROUP BY AccountSegment4 HAVING COUNT(DISTINCT ResponsibilityName) > 1) AS d) AS ambiguous_responsibility,
+    (SELECT COUNT(*) FROM (SELECT AccountSegment3 FROM dbo.[0030ADGPCOA]
+        WHERE NULLIF(LTRIM(RTRIM(InstitutionName)), '') IS NOT NULL
+        GROUP BY AccountSegment3 HAVING COUNT(DISTINCT InstitutionName) > 1) AS d) AS ambiguous_institution;
+GO
+
+/* CHECK 16  Shipment conversion. BLOCKING - QTYShipped and POLineID are
+             varchar while LineNbr is int. Gate 4d aborts the refresh on any
+             non-convertible value rather than discarding it: a discarded
+             shipment understates receipts and therefore OVERSTATES the
+             commitment held against a budget.
+             Baseline: 0 / 0 of 250,897. */
+SELECT
+    'CHECK 16: shipment conversion' AS check_name,
+    COUNT(*) AS rows_total,
+    SUM(CASE WHEN TRY_CONVERT(int, POLineID) IS NULL THEN 1 ELSE 0 END)             AS bad_polineid,
+    SUM(CASE WHEN TRY_CONVERT(decimal(19,4), QTYShipped) IS NULL THEN 1 ELSE 0 END) AS bad_qtyshipped
+FROM dbo.[0098FPOShipmentDetails];
+GO
+
+/* CHECK 17  Shipment key ambiguity. A duplicated (PONumber, POLineID) is two
+             DISTINCT GP lines colliding on an insufficient key - POLNENUM
+             tells them apart - so summing across them would corrupt the
+             commitment.
+             Baseline: 65 duplicated keys, 0 intersecting an open requisition.
+             That second figure is why pre-aggregation is currently harmless.
+             intersecting_open_encumbrance MUST be 0; gate 4d enforces it. */
+SELECT 'CHECK 17: shipment key ambiguity' AS check_name,
+    (SELECT COUNT(*) FROM (SELECT PONumber, TRY_CONVERT(int, POLineID) AS pl
+        FROM dbo.[0098FPOShipmentDetails]
+        GROUP BY PONumber, TRY_CONVERT(int, POLineID) HAVING COUNT(*) > 1) AS d) AS duplicated_keys,
+    (SELECT COUNT(*) FROM (SELECT PONumber, TRY_CONVERT(int, POLineID) AS pl
+        FROM dbo.[0098FPOShipmentDetails]
+        GROUP BY PONumber, TRY_CONVERT(int, POLineID) HAVING COUNT(*) > 1) AS d
+      INNER JOIN dbo.[0040DBudgetsEncumbrance] AS e
+              ON e.PONumber = d.PONumber AND e.LineNbr = d.pl
+      WHERE e.Status IN ('AP','PO','RT','HD','PN')) AS intersecting_open_encumbrance;
+GO
+
+/* CHECK 18  *** THE CRITICAL ONE *** InstitutionID must exist AND be populated
+             on every active mapping. A blank value passes IS NOT NULL, then
+             matches no account row, and the user sees an empty application
+             with nothing anywhere to explain it.
+             There is NO fallback to the two-way join: that rule is known to
+             expose other institutions' money (measured at TTD 99.1M), so an
+             absent column FAILS THE RELEASE.
+             Baseline: 160 active rows, 0 blank, institutions H01 and H03. */
+IF COL_LENGTH('SWRHAExpenseControl.dbo.0006CWebAppPostControls', 'InstitutionID') IS NULL
+    SELECT 'CHECK 18: InstitutionID' AS check_name, 'ABSENT - RELEASE MUST NOT PROCEED' AS verdict;
+ELSE
+    EXEC(N'
+    SELECT ''CHECK 18: InstitutionID'' AS check_name,
+        COUNT(*) AS active_rows,
+        SUM(CASE WHEN NULLIF(LTRIM(RTRIM(InstitutionID)), '''') IS NULL THEN 1 ELSE 0 END) AS blank_institution,
+        COUNT(DISTINCT InstitutionID) AS distinct_institutions
+    FROM [SWRHAExpenseControl].[dbo].[0006CWebAppPostControls] WHERE IsActive = ''TRUE'';');
+GO
+
+/* CHECK 19  Access fan-out risk. Pairs spanning more than one institution are
+             exactly why vw_WebAppUserAccess must DISTINCT on the full 4-tuple
+             and why both views must cut over in ONE transaction.
+             Baseline: 128 distinct pairs, 32 spanning - 25% of them. */
+SELECT 'CHECK 19: cross-institution pairs' AS check_name,
+    (SELECT COUNT(DISTINCT CONCAT(ResponsibilityID, '|', DepartmentID))
+       FROM [SWRHAExpenseControl].[dbo].[0006CWebAppPostControls] WHERE IsActive = 'TRUE') AS distinct_pairs,
+    (SELECT COUNT(*) FROM (SELECT ResponsibilityID, DepartmentID
+        FROM [SWRHAExpenseControl].[dbo].[0006CWebAppPostControls] WHERE IsActive = 'TRUE'
+        GROUP BY ResponsibilityID, DepartmentID HAVING COUNT(DISTINCT InstitutionID) > 1) AS d) AS pairs_spanning_institutions;
+GO
+
+/* CHECK 20 (P9)  Unmatched access grants - mappings resolving to no ledger row
+             at all. NOT blocking: an unused grant is an administration state,
+             not a failure, and a department may legitimately have no
+             goods-and-services activity. Record the number, so a POST-cutover
+             increase can be told apart from a pre-existing condition. */
+SELECT
+    'CHECK 20: unmatched access grants' AS check_name,
+    COUNT(*) AS grants_with_no_ledger_rows
+FROM (
+    SELECT DISTINCT
+        UPPER(LTRIM(RTRIM(P.InstitutionID)))    COLLATE Latin1_General_CI_AS AS I,
+        UPPER(LTRIM(RTRIM(P.ResponsibilityID))) COLLATE Latin1_General_CI_AS AS R,
+        UPPER(LTRIM(RTRIM(P.DepartmentID)))     COLLATE Latin1_General_CI_AS AS D
+    FROM [SWRHAExpenseControl].[dbo].[0006AWebAppControls] AS U
+    INNER JOIN [SWRHAExpenseControl].[dbo].[0006CWebAppPostControls] AS P ON U.PositionID = P.PositionID
+    WHERE U.IsActive = 'TRUE' AND P.IsActive = 'TRUE'
+) AS g
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.FinanceLedgerSnapshot AS s
+    WHERE s.InstitutionID = g.I AND s.ResponsibilityID = g.R AND s.DepartmentID = g.D
+);
+GO

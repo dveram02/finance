@@ -4,8 +4,16 @@
   Master table that the reporting SQL expects to reach over the linked
   server [GPSWRHA.SWRHA.CO.TT].
 
-  WHY THIS EXISTS
-  ---------------
+  *** STATUS 2026-08-25: THE FINANCE LEDGER NO LONGER NEEDS THIS. ***
+  fn_FinanceLedgerSource was rewritten to read the LOCAL chart of accounts
+  (0030ADGPCOA + 0030AEAccountNameCorrections) and no longer references
+  GL00100, GL40200 or DBA_Clusters over the linked server. Retained for any
+  OTHER consumer of [GPSWRHA...].[GL00100], and as the record of how that
+  table was reconstructed. Do not delete it -- but it is no longer a
+  prerequisite for the ledger.
+
+  WHY THIS EXISTS (historical)
+  ----------------------------
   Queries such as "SQL Revised Web App.sql" (coaData CTE) read
 
       [GPSWRHA.SWRHA.CO.TT].[SWRHA].[dbo].[GL00100]
