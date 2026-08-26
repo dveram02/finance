@@ -12,9 +12,10 @@ Companion to `financesqlupdate.md` (the plan and reasoning); this is the doing.
 
 Steps are tagged **[DB]** or **[WEB]**.
 
-**Time:** ~1 hour, most of it the rebuild in Step 6. No maintenance window — the ordering
-is what makes one unnecessary. Steps 1–7 are invisible to users; **Step 8 is the only
-moment anything changes for them.**
+**Time:** ~1 hour, most of it the rebuild in Step 6. Steps 2–8 are all on the DB box except the
+cache clear; the WEB box is only needed for Steps 1, 8 and 9. No maintenance window — the ordering
+is what makes one unnecessary. **Step 8 is the only moment the RULE changes for users** —
+but note Step 6 does move some figures slightly. See the warning in Step 6.
 
 ---
 
@@ -110,8 +111,25 @@ refuses to continue if any of that failed.
 **Save the two result sets it prints.** They are the per-FY baseline and the per-user access
 baseline — the restore is verified against them, and Step 7 compares against them.
 
-> The script refuses to run twice. That is on purpose: re-running it after a cutover would
-> overwrite the pre-change copy with post-change data and destroy the way back.
+> **The script refuses to run twice, and stops dead** (`SET NOEXEC ON`). That is on purpose:
+> once Step 5 has been applied, "current state" is post-change, so a second run would capture
+> the very code you might need to roll back.
+>
+> If you do re-run it by accident, you will see `Msg 51210` — **nothing is lost.** The snapshot
+> and refresh copies are protected (`SELECT ... INTO` cannot overwrite an existing table). Check
+> what the definitions table now holds:
+>
+> ```sql
+> SELECT ObjectName,
+>        CASE WHEN Definition LIKE '%0030ADGPCOA%' OR Definition LIKE '%encumbranceShipped%'
+>             THEN 'POST-change - use git on rollback' ELSE 'pre-change - fine' END AS state
+> FROM dbo.FinanceLedgerDefs_PreOversight ORDER BY ObjectName;
+> ```
+>
+> The **views** are what matter most, and they stay pre-change until Step 8. If the function or
+> procs show POST-change, the restore script detects it, refuses, and tells you to apply
+> `git show master:sql/FinanceLedger.sql` instead — which restores the old function, both procs
+> and the old views in one file.
 
 ---
 
@@ -140,17 +158,61 @@ WHERE object_id = OBJECT_ID('dbo.FinanceLedgerRefresh')
 
 ---
 
-## Step 6 — [WEB] Rebuild every fiscal year
+## Step 6 — [DB] Rebuild every fiscal year
 
-```powershell
-php artisan ledger:refresh --all
+> ### This step IS slightly visible to users — the one place this runbook is not silent
+>
+> It writes to the **production snapshot**, which is what the app reads. Afterwards the app is
+> still on the OLD views but over NEW data, so users will see:
+>
+> - `Approved` down ~5% (a received PO line is no longer double-counted), and because the OLD
+>   rule deducts Approved, **balances tick UP slightly**;
+> - a few lines possibly flipping from "over" to "under";
+> - **Allocation, YTD and access unchanged.**
+>
+> Small, and in the correct direction — those figures are more accurate than what they replace.
+> But it is not nothing, so prefer running this **outside business hours**: someone refreshing a
+> page mid-rebuild can watch a year's figures move as that year completes.
+>
+> The swap is transactional per year, so nobody ever sees a half-loaded year.
+
+In SSMS, against `FinanceAutomationSystem`:
+
+```sql
+EXEC dbo.usp_RefreshFinanceLedgerSnapshotAll;
 ```
+
+**Run it here rather than from the web box.** `php artisan ledger:refresh --all` is a thin
+wrapper around this exact statement and adds no logic of its own, but running it in SSMS is
+better in three ways:
+
+- **You see progress.** The proc reports a failing year via `PRINT`, and `--all` uses
+  Laravel's `->statement()`, which discards result sets — so those messages go nowhere through
+  PHP. In SSMS they appear live in the Messages tab.
+- **No network timeout.** The web box talks to `sqlapp\SQLEXPRESS` across the network and this
+  is a single ~45-minute statement. `config/ledger.php` notes `timeout_seconds` is *retained
+  but unused*, so nothing in the app guards it — you would be trusting the ODBC driver and the
+  network not to drop a long call. SSMS on the DB server is local.
+- **One less machine in the loop** during the longest step.
 
 Budget ~43 minutes; it should be faster now the linked server is gone (~22s per year on the dev
 replica, but **measure it here — that is the number that matters**).
 
-**Watch the clock and the waits.** If a year takes far longer than the rest, capture what it is
-waiting on before assuming it is stuck:
+> **The proc continues past a failing year** and throws only at the end, so a `THROW` at the
+> finish means "one or more years failed", not "nothing worked". Years that succeeded are
+> committed and fine. The verification query below is what actually tells you which.
+
+If you would rather have per-year timings as you go, run them one at a time instead — each call
+returns rows, duration and totals:
+
+```sql
+EXEC dbo.usp_RefreshFinanceLedgerSnapshot @FinancialYear = '2026';
+EXEC dbo.usp_RefreshFinanceLedgerSnapshot @FinancialYear = '2025';
+-- ... and so on for each year present in the source
+```
+
+**Watch the clock and the waits.** If a year takes far longer than the rest, open a SECOND SSMS
+window and capture what it is waiting on before assuming it is stuck:
 
 ```sql
 SELECT session_id, status, wait_type, wait_time, cpu_time, total_elapsed_time
@@ -179,8 +241,9 @@ No row may read `ABORTED`.
 
 ## Step 7 — [DB] Reconcile — this is the go/no-go point
 
-Everything so far is reversible by restoring the backup, and **the user-visible rule is not live
-yet**. Check properly before continuing.
+Everything so far is reversible by restoring the backup, and **the balance rule and access
+scoping are not live yet** — only the encumbrance figures have moved (Step 6). Check properly
+before continuing: this is the last point where reverting costs nothing but a restore.
 
 ```sql
 -- A. money: compare against the Step 4 baseline
@@ -215,8 +278,20 @@ SELECT ua.UserName, COUNT(*) AS accounts_after,
        CONVERT(decimal(19,2), SUM(s.Allocation)) AS allocation_after
 FROM dbo.FinanceLedgerSnapshot s
 JOIN ua ON ua.I = s.InstitutionID AND ua.R = s.ResponsibilityID AND ua.D = s.DepartmentID
+WHERE s.FinancialYear = '2026'      -- MUST match the Step 4 baseline, which is
+                                    -- filtered to the current FY. Without this
+                                    -- you count all 13 years and the "after"
+                                    -- figure comes out ~4x the "before" - an
+                                    -- apples-to-oranges comparison that looks
+                                    -- like a catastrophic failure. Update the
+                                    -- year when the fiscal year rolls over.
 GROUP BY ua.UserName ORDER BY ua.UserName;
 ```
+
+> **Sanity anchor.** On the 2026-08-25 data the one mapped user went from
+> **2,070 accounts / TTD 227,404,246.21** to **831 / TTD 128,258,284.14**. If your "after" is in
+> that neighbourhood, this is working. If it is *unchanged* from the baseline, the three-way join
+> is not filtering — stop and investigate before the cutover.
 
 Compare against the Step 4 access baseline:
 
@@ -224,8 +299,10 @@ Compare against the Step 4 access baseline:
 - **No user may drop to zero.** That is a rollback trigger.
 - A large drop is **expected and correct** — dev measured −60% of rows and −44% of allocation.
 
-**If any of this looks wrong, stop here.** You have changed nothing users can see. Restore with
-`sql/FinanceLedgerOversightRestore.sql` and nothing else is needed.
+**If any of this looks wrong, stop here.** The balance rule and the access scoping have NOT
+changed yet — only the underlying encumbrance figures (see Step 6). Restore with
+`sql/FinanceLedgerOversightRestore.sql`, re-enable the Agent job, and users are back to exactly
+what they had. Nothing else is needed.
 
 ---
 
@@ -316,13 +393,17 @@ After that drop, `FinanceLedgerOversightRestore.sql` can no longer restore anyth
 
 ## If it goes wrong
 
-**Before Step 8** — nothing users can see has changed. Run
-`sql/FinanceLedgerOversightRestore.sql`, re-enable the Agent job, done.
+**Before Step 8** — the rule and the access scoping are untouched; only the snapshot's
+encumbrance figures moved (Step 6). Run `sql/FinanceLedgerOversightRestore.sql`, re-enable the
+Agent job, done. No application deploy to undo.
 
 **After Step 8:**
 
 1. **[DB]** Run `sql/FinanceLedgerOversightRestore.sql` — views first (in one transaction), then
    function and procs, then the data.
+   - If it throws **`51223`**, the captured function/procs are post-change (see Step 4). The views
+     have already been restored. Apply `git show master:sql/FinanceLedger.sql` to put the old
+     function and procs back, then re-run the restore script for the data.
 2. **[WEB]** `git checkout master` → `npm ci` → `npm run build` → `php artisan cache:clear file`
 3. **[DB]** Re-enable the Agent job.
 4. Verify against the Step 4 baseline — the script prints the comparison and a fan-out check.
@@ -348,7 +429,7 @@ After that drop, `FinanceLedgerOversightRestore.sql` can no longer restore anyth
 | 3 | DB | disable Agent job | yes |
 | 4 | DB | backup | read-only |
 | 5 | DB | `FinanceLedger.sql` | yes — invisible to users |
-| 6 | WEB | `ledger:refresh --all` | yes — restore backup |
+| 6 | DB | `EXEC usp_RefreshFinanceLedgerSnapshotAll` | yes — restore backup. **Slightly visible** — see Step 6 |
 | 7 | DB | **reconcile — go/no-go** | last free exit |
 | 8 | DB+WEB | **cutover — users see this** | yes, via restore script |
 | 9 | WEB | verify in app | — |

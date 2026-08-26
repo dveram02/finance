@@ -21,24 +21,40 @@
      - the SQL Agent job (unchanged by this rollout, but disable it for the
        duration - the refresh procs have no sp_getapplock).
 
-   Idempotent: re-running REPLACES the backup with current state. Do NOT
-   re-run it after the cutover, or you will overwrite the pre-change copy
-   with post-change data and lose the way back.
+   NOT idempotent, deliberately: re-running REFUSES and stops. Once the prepare
+   stage has been applied, "current state" is post-change, so a second run would
+   capture the very code you might need to roll back. To re-take it on purpose,
+   drop all three _PreOversight tables by hand first.
    =========================================================================== */
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
 
-/* ---- refuse to overwrite a backup that has already served ---------------- */
+/* ---- refuse to overwrite a backup that has already served ----------------
+   SET NOEXEC ON, not just THROW. THROW aborts only its OWN batch, and every
+   GO below starts a new one - so on 2026-08-26 an accidental re-run threw
+   correctly, then carried on and rebuilt the definitions table from
+   POST-change objects, storing them under a name that says "PreOversight".
+
+   The data survived only because SELECT ... INTO cannot overwrite an existing
+   table and errored (Msg 2714). Do not rely on that a second time.
+
+   NOEXEC makes the rest of the script parse but not execute, which is the only
+   thing that reliably stops a multi-batch script. It is turned off again at
+   the very foot of this file.
+   ------------------------------------------------------------------------- */
 IF OBJECT_ID('dbo.FinanceLedgerSnapshot_PreOversight', 'U') IS NOT NULL
 BEGIN
     DECLARE @existing int = (SELECT COUNT(*) FROM dbo.FinanceLedgerSnapshot_PreOversight);
-    DECLARE @msg nvarchar(400) = N'A pre-Oversight backup already exists with '
-        + CONVERT(nvarchar(20), @existing) + N' rows. Re-running would overwrite it with '
-        + N'CURRENT data - which after a cutover is post-change data, destroying the way back. '
-        + N'Drop the _PreOversight tables deliberately if you really mean to re-take it.';
-    THROW 51210, @msg, 1;
+    PRINT '';
+    PRINT '*** REFUSED - NOTHING HAS BEEN CHANGED ***';
+    PRINT 'A pre-Oversight backup already exists with ' + CONVERT(varchar(20), @existing) + ' rows.';
+    PRINT 'Re-running would overwrite it with CURRENT data - which after the prepare stage is';
+    PRINT 'POST-change data, destroying the way back. If you genuinely mean to re-take it, drop';
+    PRINT 'all three _PreOversight tables by hand first, as a deliberate decision.';
+    PRINT '';
+    SET NOEXEC ON;
 END
 GO
 
@@ -48,7 +64,12 @@ SELECT * INTO dbo.FinanceLedgerRefresh_PreOversight  FROM dbo.FinanceLedgerRefre
 GO
 
 /* ---- 2. the object definitions ------------------------------------------- */
+/* Belt and braces behind NOEXEC: never drop the captured definitions unless a
+   snapshot backup is also absent. On the 2026-08-26 re-run this DROP was what
+   actually destroyed something - the guard above had already fired, but the
+   batch still executed. */
 IF OBJECT_ID('dbo.FinanceLedgerDefs_PreOversight', 'U') IS NOT NULL
+   AND OBJECT_ID('dbo.FinanceLedgerSnapshot_PreOversight', 'U') IS NULL
     DROP TABLE dbo.FinanceLedgerDefs_PreOversight;
 GO
 
@@ -119,4 +140,10 @@ ORDER BY ua.UserName;
 GO
 
 PRINT 'Backup complete. Save the result sets above - the restore is verified against them.';
+GO
+
+/* Clear the guard so this session is usable again. Harmless when the script
+   ran normally; essential when it refused, or every later batch in the same
+   SSMS window would silently do nothing. */
+SET NOEXEC OFF;
 GO

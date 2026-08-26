@@ -76,6 +76,52 @@ PRINT 'Views restored to their pre-Oversight definitions.';
 GO
 
 /* ---- 2. the function and procs ------------------------------------------- */
+/* *** DO NOT restore these from the defs table without checking them first. ***
+
+   Learned the hard way on 2026-08-26: re-running the BACKUP script mid-rollout
+   dropped and rebuilt dbo.FinanceLedgerDefs_PreOversight from whatever was
+   live AT THAT MOMENT. Because the prepare stage had already been applied, it
+   captured the NEW function and the NEW refresh proc and stored them under a
+   name that says "PreOversight". Blindly applying those would "restore" the
+   very code you are trying to roll back - silently, with no error anywhere.
+
+   The views survived that incident only because the cutover had not yet run.
+
+   So this step VERIFIES before it applies, and refuses on any doubt. The
+   function and procs are in git anyway, which is the better source for them:
+
+       git show master:sql/FinanceLedger.sql
+
+   Apply that file and it restores the old function, both old refresh procs AND
+   the old views in one go - it is the pre-change installer. Running it after
+   step 1 above is safe: it simply re-creates the same old views.
+   ------------------------------------------------------------------------- */
+
+DECLARE @suspect nvarchar(1000) = NULL;
+
+SELECT @suspect = STRING_AGG(ObjectName, ', ')
+FROM dbo.FinanceLedgerDefs_PreOversight
+WHERE ObjectName IN ('fn_FinanceLedgerSource',
+                     'usp_RefreshFinanceLedgerSnapshot',
+                     'usp_RefreshFinanceLedgerSnapshotAll')
+  AND (Definition LIKE '%0030ADGPCOA%'          -- the local COA mirror
+    OR Definition LIKE '%coaData%'
+    OR Definition LIKE '%encumbranceShipped%'   -- the netted encumbrance
+    OR Definition LIKE '%UndefinedLabelPct%');  -- the new gate metric
+
+IF @suspect IS NOT NULL
+BEGIN
+    DECLARE @w nvarchar(1600) = N'STOP - the captured definitions for [' + @suspect
+        + N'] are POST-change, not pre-change. Applying them would reinstate the code you are '
+        + N'rolling back. This happens when the backup script is re-run after the prepare stage. '
+        + N'The views (step 1) are unaffected and have been restored. '
+        + N'For these objects, apply the pre-change installer from git instead: '
+        + N'   git show master:sql/FinanceLedger.sql > FinanceLedger_master.sql '
+        + N'then run that file. It restores the old function, both procs and the old views. '
+        + N'Re-run THIS script afterwards to restore the data (step 3).';
+    THROW 51223, @w, 1;
+END
+
 DECLARE @sql nvarchar(max);
 
 DECLARE c CURSOR LOCAL FAST_FORWARD FOR

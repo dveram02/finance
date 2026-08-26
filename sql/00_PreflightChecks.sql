@@ -500,3 +500,5 @@ WHERE NOT EXISTS (
     WHERE s.InstitutionID = g.I AND s.ResponsibilityID = g.R AND s.DepartmentID = g.D
 );
 GO
+
+15
