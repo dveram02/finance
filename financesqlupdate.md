@@ -17,9 +17,10 @@ comes from, how encumbrance cost is measured, and how allocation balance is meas
 narrows user access by institution.
 
 Two companion scripts (`SQL Web App Workings E - Approved.sql`, `... - Routing.sql`) are
-**Phase 2** and out of scope. They are requisition-line detail views built on an
-`encumberanceDetails` CTE. Note only that the `ActCost` definition settled in Phase 1 must be
-reused there verbatim.
+**Phase 2** — requisition-line detail views built on an `encumberanceDetails` CTE. They remain
+out of scope for the Phase 1 cutover, but **their access join is no longer an open question**:
+as of 2026-08-26 Phase 2 builds on the corrected copies in `sql/`, not on the drafts. See
+*Phase 2 — adopted basis*. The `ActCost` definition settled in Phase 1 must be reused verbatim.
 
 **Intended outcome:** `fn_FinanceLedgerSource` and `vw_FinanceLedger` reproduce the new script's
 numbers, the app renders them honestly, and the ledger stops touching the linked server.
@@ -52,6 +53,7 @@ Diffed against the current `sql/FinanceLedger.sql`, not against the old root scr
 | **B** | **Encumbrance nets off shipped quantity.** `ActCost = (Quantity − QtyShipped) × UnitCost` via `[0098FPOShipmentDetails]` on `LineNbr = POLineID AND PONumber = PONumber`, replacing raw `ExtendedCost`. | `Approved` and `Routing` fall — a received PO line is no longer double-counted against the GL actual that replaced it. |
 | **C** | **Balance maths changes.** `AcutalYTDExpense = YTDTotal + Approved`; excess and balance measured against **`YTDTotal` alone**. Routing displayed, deducts nothing. | Contradicts the current documented rule. See *Decisions*. |
 | **D** | **Access join gains InstitutionID.** | Narrows visibility. **Risk accepted knowingly — see below.** |
+| **E** | **Phase 2 adopts the three-way access join** (decided 2026-08-26). The two `Workings E` drafts join on two columns; corrected copies in `sql/Phase2RequisitionDetail_*.sql` join on three via `dbo.vw_WebAppUserAccess`. | Brings the detail views into line with Phase 1. Measured: removes a 71x overstatement on Approved and reconciles detail to summary. See *Phase 2 — adopted basis*. |
 
 **Unplanned upside from (A):** `sql/FinanceLedgerAgentJob.sql` Section 2 is a hard deployment gate
 on linked-server login mapping, justified at line 62 by `fn_FinanceLedgerSource` reading GL40200
@@ -872,14 +874,20 @@ Pint only on changed files — a repo-wide run reformats ~nine unrelated pre-exi
 
 ---
 
-## Out of scope (Phase 2)
+## Phase 2 and Phase 3 — moved to their own plans
 
-`SQL Web App Workings E - Approved.sql` and `SQL Web App Workings E - Routing.sql` — requisition
-line detail views over `encumberanceDetails`, filtered `Status IN ('AP','PO')` and
-`('RT','HD','PN')`, with new pages to render them. They reuse the `ActCost` definition from
-step 2c verbatim.
+Phase 2 (requisition-line detail, data layer) and Phase 3 (the pages over it) were part of this
+document until 2026-08-26. They outgrew a subsection of a Phase 1 plan, so each now has its own:
 
----
+| File | Covers |
+|---|---|
+| `financesqlupdatep2.md` | **Phase 2** — `FinanceRequisitionSnapshot`, its refresh, the Agent-job step, the reconciliation gate, and the measurements behind every decision |
+| `financesqlupdatep3.md` | **Phase 3** — the two detail pages, controllers and tests |
+| `financesqlupdateprogress.md` | progress, incidents and open TODOs for **all** phases |
+
+What stayed here: Phase 1 only. Two Phase 1 facts that Phase 2 depends on, so they are worth
+knowing before reading it — `Decision D` (the three-way institution-scoped access join) and step
+2c's `ActCost` definition, which Phase 2 reuses verbatim.
 
 ## Appendix A — response to review
 
@@ -1043,8 +1051,13 @@ Where a finding depends on schema, verify against data as current as the artifac
 
 - Build time after the linked server is removed; the 102–256s/FY figures remain stale.
 - The execution plan that step 5's index decision depends on.
-- Whether Phase 2's two-way join is intentional or an oversight — ask alongside anything else the
-  finance team is asked.
+- Phase 2's access join is **decided, not merely measured** — the three-way form is adopted
+  (Decision E). What is still unconfirmed is *why* the drafts used two columns; the evidence points
+  to drift, since `InstitutionID` landed on `0006C` between 2026-07-31 and 2026-08-25 while the
+  drafts are timestamped 2026-08-24. Worth confirming with finance, but it no longer blocks
+  anything.
+- Whether Phase 2's detail views should apply the reporting-line-3 goods and services join. This
+  **does** need a finance answer before Phase 2 go-live.
 
 ---
 

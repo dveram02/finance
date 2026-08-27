@@ -28,4 +28,29 @@ for the full list and the reasoning.
 
 Phase 1 implements the three-way join. **If Phase 2 ships the two-way join as written, the detail
 pages will list requisitions for accounts the summary page excludes, and the two will never
-reconcile.** Resolve with the finance team before starting Phase 2.
+reconcile.**
+
+**Measured on production 2026-08-26** (as `KEN CHARLES` / `KCHARLES1`, FY2026, read-only). The
+two-way form both over-permits and duplicates:
+
+| Script | as written (2-way) | 3-way | Institutions |
+|---|---|---|---|
+| Routing | 5,949 rows / TTD 131,164,220.53 | 777 rows / TTD 4,696,550.19 | 47 → 2 |
+| Approved | 30,626 rows / TTD 2,711,349,433.34 | 3,452 rows / TTD 38,080,501.68 | 48 → 2 |
+
+The duplication is separate from the access scope: the inline `userAccess` CTE carries no
+`DISTINCT`, and 32 of 128 `(Responsibility, Department)` pairs span two institutions, so every
+line on them is emitted twice. Against the live summary, two-way detail references 441 accounts
+(67%) the summary excludes; three-way references 2, both off reporting-line-3.
+
+**Resolved 2026-08-26 — Phase 2 uses the corrected copies in `sql/`**:
+`Phase2RequisitionDetail_Routing.sql` and `Phase2RequisitionDetail_Approved.sql`, with the inline
+CTE replaced by `dbo.vw_WebAppUserAccess` joined on all three columns. The drafts in this
+directory are unchanged and remain the immutable reference copies — **do not build Phase 2 from
+them.** Recorded as Decision E in `financesqlupdatep2.md`.
+
+The corrected copies also apply the reporting-line-3 goods and services scope (decided
+2026-08-26) and replace the drafts' `ActCost` with the Phase 1 definition — the drafts' version is
+not floored at zero, does not pre-aggregate shipments, and uses float, which put one account at
+TTD −5,945,460.79 against +1,513,488.86 in the summary. `sql/Phase2ReconciliationTest.sql` guards
+both and passes.
