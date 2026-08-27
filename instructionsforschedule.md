@@ -64,7 +64,7 @@ where.exe php
 **Expect:** `C:\php\php.exe`. If it is somewhere else, update `$phpPath` in
 `scripts\check-ledger-health.ps1`.
 
-Confirm the application path is `C:\Apache24\htdocs\production\finance`. If it differs, update
+Confirm the application path is `C:\Apache24\htdocs\production\finance-automation-system`. If it differs, update
 `$ProjectRoot` / `$appPath` in every script in `scripts\`, and the `cd /d` line in
 `manage-ledger.bat`.
 
@@ -306,7 +306,7 @@ $pw = Read-Host -AsSecureString "Password for FinanceSvc"
 New-LocalUser -Name "FinanceSvc" -Password $pw -PasswordNeverExpires `
     -FullName "SWRHA Finance Service" -Description "Runs the Finance ledger health check"
 
-$app = "C:\Apache24\htdocs\production\finance"
+$app = "C:\Apache24\htdocs\production\finance-automation-system"
 icacls "$app\storage"         /grant "FinanceSvc:(OI)(CI)M" /T
 icacls "$app\bootstrap\cache" /grant "FinanceSvc:(OI)(CI)M" /T
 ```
@@ -335,7 +335,7 @@ Task Scheduler (`taskschd.msc`) → **Create Task** (not "Create Basic Task").
 **Actions:** Start a program → `powershell.exe`, arguments:
 
 ```
--NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance\scripts\check-ledger-health.ps1"
+-NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance-automation-system\scripts\check-ledger-health.ps1"
 ```
 
 **Settings:** Stop task if it runs longer than 5 minutes. If already running, do not start a new

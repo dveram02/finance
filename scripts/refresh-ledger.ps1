@@ -25,7 +25,7 @@
 # long SQL Server scan will not disturb anything else.
 #
 # Usage (manual):
-#   powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance\scripts\refresh-ledger.ps1"
+#   powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance-automation-system\scripts\refresh-ledger.ps1"
 #   ... -Year 2026
 #   ... -All
 #   ... -Year 2026 -Force
@@ -44,7 +44,7 @@ param (
     [switch]$Force
 )
 
-$ProjectRoot = "C:\Apache24\htdocs\production\finance"
+$ProjectRoot = "C:\Apache24\htdocs\production\finance-automation-system"
 
 # storage\logs\ledger, not storage\logs\scheduler: the scheduler directory
 # belonged to run-scheduler.ps1, which no longer exists. This was the only other

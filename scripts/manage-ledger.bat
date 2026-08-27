@@ -36,7 +36,7 @@ echo 11. Exit
 echo.
 set /p choice="Enter your choice (1-11): "
 
-cd /d "C:\Apache24\htdocs\production\finance"
+cd /d "C:\Apache24\htdocs\production\finance-automation-system"
 
 if "%choice%"=="1" goto status
 if "%choice%"=="2" goto refresh_recent

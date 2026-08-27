@@ -8,6 +8,10 @@ progress log for all phases.**
 **Status: Phase 1 is LIVE in production as of 2026-08-26.** Steps 1–10 of the runbook are
 complete; Step 11 (merge, and dropping the backup tables) is deliberately outstanding.
 
+**Phase 2 (the requisition-detail data layer) is BUILT, and RE-VERIFIED 2026-08-27 against a
+fresh PRODUCTION RESTORE on dev — all 15 fiscal years reconcile, 0 mismatches. It is NOT deployed
+to production.** See the Phase 2 sections at the foot of this file.
+
 ---
 
 ## What shipped
@@ -296,3 +300,185 @@ Worth recording, because several documents still assert the old values:
 | `0006C` columns | Position → Responsibility + Department | now also **`InstitutionID`** |
 
 Any worked example naming a specific user is a dated observation. Re-measure; never quote.
+
+---
+
+## Phase 2 — BUILT AND VERIFIED ON DEV, 2026-08-26
+
+**Status: the data layer is implemented and proven on dev. Nothing is deployed to production.**
+Design and the full as-built record are in `financesqlupdatep2.md`; this is the log entry.
+
+Items 9 and 10 above are the decisions this implements. Both stand — three-way access join,
+snapshot-backed rather than live views — and nothing measured during implementation contradicted
+them.
+
+### What was built
+
+| File | Role |
+|---|---|
+| `sql/FinanceRequisition.sql` | Snapshot, staging, run-keyed refresh log, `usp_RefreshFinanceRequisition`, both read views, verification queries |
+| `sql/FinanceRequisitionAgentJobStep.sql` | Amends the **existing** Agent job: step 1's success action, then step 2. Grants, verification, rollback |
+| `sql/FinanceRequisitionRollback.sql` | Guarded teardown; refuses to run while the Agent step still exists |
+| `app/Console/Commands/RefreshFinanceRequisition.php` | `php artisan requisition:refresh` — manual only |
+| `app/Console/Commands/LedgerStatus.php` | Extended to read **both** refresh logs and assert they are from the same run |
+| `config/ledger.php` | `ledger.requisition.max_run_drift_minutes` |
+| `scripts/check-ledger-health.ps1` | Alert body widened; the assertion itself lives in `ledger:status` |
+
+### Measured on dev
+
+106,358 rows / 15 fiscal years / 1,644 accounts, built in **18–19s**. 22,324 accounts reconciled,
+**0 mismatches**, 0 duplicate grain rows, 685 unparsed account numbers.
+
+**The whole 15-year build is faster than one page query used to be** — the Approved reference query
+runs ~47s per execution because of the shipment aggregate, and the snapshot pays it once.
+
+Reconciliation, per account and user-agnostic, against `FinanceLedgerSnapshot`:
+
+| FY | Ledger snapshot built | Accounts | Drifting |
+|---|---|---|---|
+| 2026 | 2026-08-24 (post-Oversight) | 2,236 | **0** |
+| 2025 | 2026-08-24 (post-Oversight) | 2,117 | **0** |
+| 2024 … 2014 | 2026-08-03 (**pre**-Oversight) | 1,814–1,887 each | 355 total |
+
+Every drifting account is in a year whose summary still carries the OLD encumbrance rule. Read back
+per user through the live views, `KCHARLES1`/FY2026: detail Approved 41,901,433.34 vs summary
+41,901,433.34, Routing 4,300,785.01 vs 4,300,785.01 — **diff 0.0000 on both**, 3,388 + 777 = 4,165
+rows. Those are exactly the dev figures `sql/Phase2ScopeVariants.md` records for the same day,
+reached through a different code path. FY2025 had never been checked and also ties exactly. No
+fan-out; the scoped view drops exactly the two known off-line-3 accounts.
+
+**Negative test passed.** Forcing every year into the freshness window aborts the build with
+`RECONCILIATION FAILED: 355 account(s)...`, `@Force = 1` does **not** bypass it, the previous
+snapshot survives intact and the abort appends its own log row without overwriting the last good
+run's figures.
+
+**102 tests / 30,552 assertions still pass** — unchanged from the Phase 1 baseline.
+
+### Decisions taken during implementation
+
+Four of these close items the plan left open; the first was not anticipated at all.
+
+1. **The reconciliation gate aborts only on fiscal years the LEDGER refreshed recently**
+   (`@ReconMaxLedgerAgeHours`, default 36h); older years are compared and recorded as
+   `ReconStaleYearDrift`. **Without this the gate aborts every night forever** — step 1 refreshes
+   two years nightly and all years monthly, while step 2 rebuilds all years every run, so a closed
+   year that moves in the source disagrees *correctly* for up to a month. Dev demonstrated it
+   immediately: 355 accounts across eleven pre-Oversight years.
+2. **The refresh log is RUN-KEYED** (`RunId IDENTITY`, append-only, trimmed to 200 runs). The plan
+   left this open. Appending keeps the last good figures without `FinanceLedgerRefresh`'s MERGE and
+   gives a short history for free.
+3. **Segment parsing uses Phase 1's delimiter splitter, not the drafts' fixed substring offsets** —
+   closing the plan's open item. Two different splitters would let a parsing difference present as
+   a money defect through the reconciliation gate. No measured figure changed; it closes a latent
+   defect.
+4. **The `int = varchar` `LineNbr = POLineID` join is settled** — the plan flagged it as unresolved
+   "because a live view has no pre-pass". The snapshot has one (gate A2, whole-table), so the build
+   keeps Phase 1's fail-closed `CONVERT`.
+5. **No `fn_FinanceRequisitionSource`.** The build is inline in the proc so the shipment aggregate
+   is materialised once for all fifteen years; a per-year TVF would pay the dominant cost fifteen
+   times.
+6. **No cutover script.** Phase 1 needed one because two views that had to change together were
+   already being read. Nothing reads the Phase 2 views, so there is no window to close — explicitly
+   not a precedent for future changes.
+
+### Incident during implementation
+
+**5. Column widths were guessed, and one was wrong (2026-08-26, dev only).** The first snapshot DDL
+declared `ItemDescription nvarchar(500)` on the reasoning that GP descriptions are short. The build
+failed on the first row over 500 characters. The source column is `varchar(max)` and the longest
+value is 668; `ReqDateCreated` is a `date`, not a datetime; everything else is
+`varchar(255) COLLATE Latin1_General_CI_AS`. All passthrough types are now read off `sys.columns`
+rather than chosen. Caught by the build on dev, which is what dev is for — but it would have been
+caught by reading the source schema first, which costs one query.
+
+### Verified 2026-08-27: the Agent job step and the rollback both EXECUTED on dev
+
+Both scripts were unexecuted when the entry above was written. Both have now been run.
+
+* **§0 preflight on dev**: exactly one step, `on_success_action = 1`, `on_fail_action = 2`,
+  retry 2/20 — matching the committed `FinanceLedgerAgentJob.sql` precisely.
+* **Job ran end to end**: step 1 succeeded (26s) → **chained to** step 2 (24s) → job outcome
+  succeeded, 51s, both as `NT SERVICE\SQLAgent$SQLEXPRESS`. A second run reproduced it (48s).
+  **That chaining is the whole point of the `on_success_action = 3` change** — left at 1 the job
+  reports success nightly while step 2 never runs.
+* **`ledger:status` then returned drift 0 min / outcome OK / exit 0** — the same-run assertion
+  satisfied for real, not just exercised.
+* **Rollback guard tested armed**: with `@DropObjects = 1` and step 2 still present it threw
+  `51300` and dropped nothing. That is precisely incident 1's failure mode (`THROW` aborts only
+  its own batch; every `GO` starts a new one) — the single-batch design holds.
+* **Rollback tested for real**: after §8 removed step 2 and restored step 1 (job verified back to
+  its original shape), the script dropped the views, proc and staging, **retained** the snapshot
+  (106,358 rows) and log, and printed the last three runs. Flags back at 0 = no-op. Re-running the
+  installer over the retained data restored everything.
+* **Degradation confirmed**: with the proc gone, `requisition:refresh` exits 1 with a clear
+  message and `ledger:status` still reports ledger freshness.
+
+Dev is left in the intended production shape, step 2 included. Revert with §8 if unwanted.
+
+
+### Re-verified 2026-08-27 against a FRESH PRODUCTION RESTORE
+
+Dev was refreshed from the most recent production backup, which made possible the one test the
+earlier run could not do. On the old dev copy only FY2025/FY2026 were post-Oversight, so only two
+years could be gated. **On the restore every ledger year is post-Oversight and was refreshed
+within 36h, so all thirteen were compared AND gated.**
+
+The restore also wiped the Phase 2 objects, so this was a clean install from
+`sql/FinanceRequisition.sql` — an unintended but useful test of the installer on a virgin database.
+
+| | |
+|---|---|
+| Rows | **106,410** / 15 fiscal years / 1,644 accounts |
+| Build | **11–14s** |
+| Reconciled | **22,325** accounts, **0** mismatches |
+| `ReconStaleYearDrift` | **0** (was 355 on the pre-Oversight copy) |
+| Duplicate grain rows | **0** |
+
+Every fiscal year FRESH (13–25h old) and 0 drifting: FY2026 2,238 accounts, FY2025 2,117,
+FY2024–2014 785–1,886 each. **This validates the stale-year carve-out rather than weakening it** —
+when the ledger is current across all years, which is production's normal state, every year is
+gated and every year passes.
+
+Read back through the views: no fan-out, and **every user/FY ties exactly** across eleven fiscal
+years (FY2022/FY2023 have no source rows). FY2026 / `KCHARLES1`:
+**Approved TTD 41,936,916.59, Routing TTD 4,512,250.19** — the *production* figures already
+recorded in `sql/Phase2ScopeVariants.md`, reproduced to the cent through a different code path.
+The scoped view drops exactly the two known off-line-3 accounts.
+
+Agent job end to end on the restored DB: step 1 (24s) → step 2 (23s) → success, 48s.
+`ledger:status`: outcome OK, drift 1 min, **exit 0**.
+
+#### ⚠ NEW FINDING — a user-database restore silently breaks the Agent step
+
+The job lives in **msdb**; the Phase 2 objects live in **FinanceAutomationSystem**. After the
+restore the job still carried step 2, calling a proc that no longer existed — it would have failed
+at 21:30 that night. Observed directly.
+
+**Add to the production runbook: after ANY restore of `FinanceAutomationSystem`, re-run
+`sql/FinanceRequisition.sql` and one manual `EXEC dbo.usp_RefreshFinanceRequisition` before the
+next 21:30.** The same applies to Phase 1's objects. The failure would be loud (step 2 errors, the
+job reports failure, `ledger:status` reports drift) — but better fixed during the restore than
+discovered from an alert.
+
+### Phase 2 TODO
+
+14. **Deploy to production.** In order: `sql/FinanceRequisition.sql`, one manual
+    `EXEC dbo.usp_RefreshFinanceRequisition` to prove the build, **then**
+    `sql/FinanceRequisitionAgentJobStep.sql`. Scheduling a proc that has never run once is how a
+    failure first becomes visible at 21:30 to nobody.
+15. **Read PRODUCTION's job step 1 before amending it** — §0 of
+    `sql/FinanceRequisitionAgentJobStep.sql`. Done on dev 2026-08-27; **production still never
+    inspected** (the VPN was down). Dev matching the
+    committed script is corroboration, not proof. **More than one step means someone has already
+    amended the job and the plan needs rereading.**
+16. **Measure the production build** and re-check two thresholds that are both sized off
+    pre-2026-08-25 ledger timings and are probably far too loose:
+    `@ReconMaxLedgerAgeHours` (36h) and `FINANCE_REQUISITION_MAX_DRIFT_MINUTES` (180).
+17. **685 rows have an account number the splitter cannot parse** (unchanged on the production
+    restore). Recorded, not gated — Phase 1
+    hides the same accounts the same way, so gating here would abort Phase 2 on a condition Phase 1
+    tolerates. Worth understanding what those account numbers look like.
+18. **Phase 3 is now unblocked** — `vw_FinanceRequisitionDetail`,
+    `vw_FinanceRequisitionDetailUnscoped` and `FinanceRequisitionRefresh` all exist on dev. Note
+    for Phase 3: the refresh log is run-keyed, so version its filter caches against
+    `MAX(RefreshedAt) WHERE Outcome = 'OK'`, not against `FinanceLedgerRefresh`.

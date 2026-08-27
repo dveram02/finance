@@ -62,4 +62,37 @@ return [
         'timeout_seconds' => (int) env('FINANCE_LEDGER_REFRESH_TIMEOUT', 7200),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Requisition Detail (Phase 2)
+    |--------------------------------------------------------------------------
+    |
+    | dbo.FinanceRequisitionSnapshot is built by STEP 2 of the same SQL Server
+    | Agent job that builds the ledger, immediately after step 1. The two are
+    | deliberately in one job so both snapshots come from the same source state
+    | — see financesqlupdatep2.md.
+    |
+    | max_run_drift_minutes is what turns that into something monitorable.
+    | Agent steps cannot share a transaction, so step 1 can succeed while step 2
+    | fails: the summary advances, the detail does not, and BOTH tables still
+    | look individually fresh. The only symptom is that their RefreshedAt values
+    | stop coming from the same run, which is what `php artisan ledger:status`
+    | asserts.
+    |
+    | The default must exceed the LEDGER STEP'S OWN DURATION, because step 2
+    | cannot start until step 1 finishes. Measured on production 2026-08-05, a
+    | full 13-year ledger rebuild took ~43 minutes; the nightly current+prior-FY
+    | run takes ~8. 180 minutes leaves headroom above the monthly worst case
+    | without being so loose that a missed nightly step 2 hides inside it.
+    |
+    | RE-MEASURE after the 2026-08-25 change — the ledger function no longer
+    | touches the linked server and builds one FY in ~22s on dev, so the real
+    | figure is very likely far smaller and this can be tightened.
+    |
+    */
+
+    'requisition' => [
+        'max_run_drift_minutes' => (int) env('FINANCE_REQUISITION_MAX_DRIFT_MINUTES', 180),
+    ],
+
 ];

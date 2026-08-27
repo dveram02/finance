@@ -9,11 +9,31 @@
 # ShouldQueue). What it monitors is the SQL Server snapshot that the whole
 # application reads from.
 #
-# It is also the ONLY alerting path, because Database Mail is not configured on
-# sqlapp\SQLEXPRESS - a failed Agent job writes to sysjobhistory and the Windows
-# Application event log and nowhere a human looks. And a job that is DISABLED
-# never fails, so it would send nothing even once mail is enabled. This task is
-# not optional.
+# DATABASE MAIL IS NOW CONFIGURED on sqlapp\SQLEXPRESS (sql\FinanceDatabaseMail.sql),
+# so a job that RUNS AND FAILS now emails the Finance Admin operator. That covers
+# a real gap - but it does NOT make this task redundant, and the reason is worth
+# understanding before anyone decides to retire it:
+#
+#   Database Mail can only alert on a job that FIRES. It sends nothing when the
+#   Agent service is stopped, when the job is disabled, or when the job has been
+#   deleted - because in those cases nothing runs to send the mail. A DISABLED
+#   job never fails, so it never emails, and the figures go stale in exactly the
+#   same way.
+#
+#     failure                        Database Mail   this task
+#     ---------------------------    -------------   ---------
+#     a sanity gate aborts a step         YES           yes
+#     step 2 fails, step 1 succeeded      YES           yes (drift)
+#     SQL Agent service stopped           ** NO **      YES
+#     job disabled                        ** NO **      YES
+#     job deleted                         ** NO **      YES
+#
+# This task is the only monitor living in a DIFFERENT FAILURE DOMAIN from the
+# thing it monitors - which is also why it is not a second Agent job on the DB
+# server. A watchdog inside the process it watches cannot report that the
+# process has died. The two-server topology is what makes this possible.
+#
+# Register it with scripts\register-health-check-task.ps1.
 #
 # The failure this exists to catch:
 #   If the scheduler stops, NOTHING errors. No exception, no warning banner, no
@@ -22,13 +42,26 @@
 #   Staleness therefore has to be asserted against the clock; it can never be
 #   detected by waiting for something to break.
 #
+# PHASE 2 ADDED A SECOND, SUBTLER VERSION OF THE SAME FAILURE. The Agent job now
+# has TWO steps: step 1 builds the ledger snapshot, step 2 builds the requisition
+# detail snapshot. Agent steps cannot share a transaction, so step 1 can succeed
+# while step 2 fails - the summary advances, the detail does not, and a user
+# drilling from one into the other sees two figures that disagree.
+#
+# Nothing about that is visible in either table on its own: both look fresh, they
+# are simply from different nights. `ledger:status` therefore also asserts that
+# the two RefreshedAt values are from the SAME RUN, and exits non-zero when they
+# drift. That assertion is the entire monitoring story for step 2 - this script
+# needed no new logic, only a wider alert body.
+#
 # Delegates the actual check to `php artisan ledger:status`, which reads
-# dbo.FinanceLedgerRefresh through Laravel's configured connection. That keeps
-# the SQL Server credentials in .env and out of this script.
+# dbo.FinanceLedgerRefresh AND dbo.FinanceRequisitionRefresh through Laravel's
+# configured connection. That keeps the SQL Server credentials in .env and out of
+# this script.
 #
 # Windows Task Scheduler setup:
 #   Program  : powershell.exe
-#   Arguments: -NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance\scripts\check-ledger-health.ps1"
+#   Arguments: -NonInteractive -ExecutionPolicy Bypass -File "C:\Apache24\htdocs\production\finance-automation-system\scripts\check-ledger-health.ps1"
 #   Trigger  : Daily, repeat every 30 minutes for a duration of 1 day
 #   Run whether user is logged on or not
 #   Stop task if it runs longer than: 5 minutes
@@ -41,7 +74,7 @@ param (
 )
 
 # Configuration
-$appPath           = "C:\Apache24\htdocs\production\finance"
+$appPath           = "C:\Apache24\htdocs\production\finance-automation-system"
 $phpPath           = "C:\php\php.exe"        # UPDATE if PHP is elsewhere
 $logFile           = "$appPath\storage\logs\ledger-health-check.log"
 $alertEmail        = "admin@swrha.com"       # UPDATE for email alerts
@@ -138,24 +171,40 @@ try {
     $statusOutput -split "`r?`n" | Where-Object { $_.Trim() -ne "" } | ForEach-Object { Write-Log "  $_" }
 
     if ($statusExit -ne 0) {
-        Write-Log "CRITICAL: Ledger snapshot is stale, aborted, or unreadable (exit $statusExit)."
-        Send-Alert "SWRHA Finance - Ledger Snapshot Stale" @"
-The finance ledger snapshot has failed its freshness check.
+        Write-Log "CRITICAL: A finance snapshot is stale, aborted, out of step, or unreadable (exit $statusExit)."
+        Send-Alert "SWRHA Finance - Snapshot Health Check Failed" @"
+A finance snapshot has failed its freshness check.
 
 $($statusOutput -join "`r`n")
 
 The application is still serving data, but the figures are out of date.
 
+READ THE MESSAGE ABOVE FIRST - it names which of the three failures this is.
+
+  1. LEDGER STALE. The nightly job is not running at all.
+  2. REQUISITION STALE, or the two snapshots are N MINUTES APART. Step 1
+     succeeded and step 2 did not, so the detail pages now disagree with the
+     summary they drill into. The job's own history will show step 2 failing
+     while the job reports whatever step 1 did.
+  3. ABORTED. A sanity gate held the previous snapshot ON PURPOSE. Read the
+     Message before forcing anything - a RECONCILIATION FAILED message means
+     the detail no longer ties to the summary, and --force does not bypass it.
+
 Check the SQL Agent job 'SWRHA Finance - Ledger Refresh' on sqlapp\SQLEXPRESS:
   - is the job enabled, and is the SQL Server Agent service running?
+  - does it still have BOTH steps, and is step 1's success action 'go to the
+    next step'? If step 1 quits on success, step 2 never runs and the job
+    reports success every night regardless:
+      SELECT step_id, step_name, on_success_action FROM msdb.dbo.sysjobsteps s
+      JOIN msdb.dbo.sysjobs j ON j.job_id = s.job_id
+      WHERE j.name = 'SWRHA Finance - Ledger Refresh'
   - SELECT * FROM msdb.dbo.sysjobhistory for the failure reason
-  - SELECT * FROM FinanceAutomationSystem.dbo.FinanceLedgerRefresh for Outcome/Message
-
-An Outcome of 'ABORTED' means a sanity gate held the previous snapshot on
-purpose - read the Message before forcing anything.
+  - SELECT * FROM FinanceAutomationSystem.dbo.FinanceLedgerRefresh
+  - SELECT TOP 5 * FROM FinanceAutomationSystem.dbo.FinanceRequisitionRefresh
+    ORDER BY RunId DESC
 "@
     } else {
-        Write-Log "OK: Ledger snapshot is fresh."
+        Write-Log "OK: Both snapshots are fresh and from the same run."
     }
 } catch {
     Write-Log "ERROR: Could not run ledger:status: $($_.Exception.Message)"
