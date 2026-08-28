@@ -110,6 +110,11 @@ const sections = reactive([
       { name: 'Monthly Expenditure', icon: 'fas fa-chart-line', routeName: 'monthly-expenditure.index', routeParams: {}, activeWhen: { any: ['monthly-expenditure.*'] } },
       { name: 'Department Expenditure', icon: 'fas fa-table-columns', routeName: 'department-expenditure.index', routeParams: {}, activeWhen: { any: ['department-expenditure.*'] } },
       { name: 'Allocation Line Expenditure', icon: 'fas fa-scale-balanced', routeName: 'allocation-line-expenditure.index', routeParams: {}, activeWhen: { any: ['allocation-line-expenditure.*'] } },
+      // The requisition-line drill-downs behind the Allocation Line page's
+      // Approved and Routing columns. Listed here with the summary pages, last,
+      // so they read as the finest grain of the same finance data.
+      { name: 'Encumbered Details', icon: 'fas fa-file-circle-check', routeName: 'encumbered-details.index', routeParams: {}, activeWhen: { any: ['encumbered-details.*'] } },
+      { name: 'Routing Details', icon: 'fas fa-route', routeName: 'routing-details.index', routeParams: {}, activeWhen: { any: ['routing-details.*'] } },
     ]
   },
   {

@@ -1,12 +1,16 @@
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed } from 'vue'
+import { useTableScroll } from '@/composables/useTableScroll'
 
 /**
- * Shared behaviour for the wide fiscal-year ledger tables.
+ * Shared behaviour for the wide FISCAL-MONTH ledger tables.
  *
- * Covers the parts that are identical across every such view: measuring whether
- * the table can scroll, the column crosshair, per-row heat shading, and the
- * context-sensitive arrow keys. Column layout stays with each page, because the
- * column sets differ.
+ * Covers the parts that only make sense against a 12-month axis: the column
+ * crosshair and the per-row heat shading. Scrolling and the context-sensitive
+ * arrow keys live in useTableScroll, which the requisition detail tables also
+ * use — they are wide and scroll identically but have no month axis, and
+ * sharing that core is what stops the two scroll implementations drifting.
+ *
+ * Column layout stays with each page, because the column sets differ.
  *
  * @param {object}   options
  * @param {Function} options.months     () => array of month descriptors ({ key })
@@ -15,22 +19,14 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
  * @param {Function} options.onNextYear called when → should step the fiscal year
  */
 export function useLedgerTable({ months, rows, onPrevYear, onNextYear }) {
-    // ── Scroll affordance ───────────────────────────────────────────────────
-    // Whether the table can scroll depends on viewport width, the sidebar, and
-    // how wide the identity columns have grown at the current breakpoint — none
-    // of which can be decided up front, so measure the element.
-    const scroller = ref(null)
-    const canScroll = ref(false)
-    let resizeObserver = null
-
-    const measureScroll = () => {
-        const el = scroller.value
-        canScroll.value = !!el && el.scrollWidth - el.clientWidth > 1
-    }
-
-    // Row count changes alter scrollWidth without resizing the container, so the
-    // observer alone would miss them.
-    watch(() => rows().length, () => nextTick(measureScroll))
+    const scroll = useTableScroll({
+        rowCount: () => rows().length,
+        onPrevYear,
+        onNextYear,
+        // One month column is one scroll step, so figures stay aligned under
+        // their headings.
+        stepSelector: 'thead [data-month-index]',
+    })
 
     // ── Column crosshair ────────────────────────────────────────────────────
     // Delegated, rather than a listener on every one of a few hundred cells.
@@ -70,82 +66,18 @@ export function useLedgerTable({ months, rows, onPrevYear, onNextYear }) {
         return { backgroundImage: `linear-gradient(rgba(${rgb}, ${alpha}), rgba(${rgb}, ${alpha}))` }
     }
 
-    // ── Context-sensitive arrow keys ────────────────────────────────────────
-    // Over the table the arrows scroll months, which is what someone reading a
-    // row wants; anywhere else they step fiscal years. Without the split, trying
-    // to scroll to September silently throws you into a different year.
-    //
-    // Hover and focus are tracked as state rather than read from
-    // document.activeElement, which is not reactive — the page's hint has to
-    // re-render when either changes.
-    const pointerInTable = ref(false)
-    const tableFocused = ref(false)
-
-    const arrowsScrollTable = computed(() =>
-        canScroll.value && (pointerInTable.value || tableFocused.value)
-    )
-
-    // Scroll by exactly one column so figures stay aligned under their headings,
-    // rather than the browser's fixed ~40px nudge. Measured from a real cell
-    // because the width changes across breakpoints.
-    const monthStep = () => scroller.value?.querySelector('thead [data-month-index]')?.offsetWidth || 96
-
-    const scrollMonths = (direction) => {
-        const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-
-        scroller.value?.scrollBy({
-            left: direction * monthStep(),
-            behavior: reduceMotion ? 'auto' : 'smooth',
-        })
-    }
-
-    const handleKeydown = (e) => {
-        // A focused <select> owns its own arrow-key behaviour; never steal it.
-        const tag = document.activeElement?.tagName
-        if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return
-
-        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-
-        const direction = e.key === 'ArrowLeft' ? -1 : 1
-
-        // Table wins while the user is in it — but only if there is anything to
-        // scroll, so on a wide screen the arrows still step fiscal years.
-        if (arrowsScrollTable.value) {
-            e.preventDefault()
-            scrollMonths(direction)
-
-            return
-        }
-
-        const step = direction === -1 ? onPrevYear : onNextYear
-        if (step && step() !== false) e.preventDefault()
-    }
-
-    onMounted(() => {
-        window.addEventListener('keydown', handleKeydown)
-
-        measureScroll()
-        if (scroller.value) {
-            resizeObserver = new ResizeObserver(measureScroll)
-            resizeObserver.observe(scroller.value)
-        }
-    })
-
-    onUnmounted(() => {
-        window.removeEventListener('keydown', handleKeydown)
-        resizeObserver?.disconnect()
-    })
-
     return {
-        scroller,
-        canScroll,
-        measureScroll,
+        // Scroll surface, unchanged for the pages that already consume it.
+        scroller: scroll.scroller,
+        canScroll: scroll.canScroll,
+        measureScroll: scroll.measureScroll,
+        pointerInTable: scroll.pointerInTable,
+        tableFocused: scroll.tableFocused,
+        arrowsScrollTable: scroll.arrowsScrollTable,
+
         hoveredMonth,
         onTableHover,
         clearHover,
         heatStyle,
-        pointerInTable,
-        tableFocused,
-        arrowsScrollTable,
     }
 }

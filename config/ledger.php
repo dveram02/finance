@@ -89,10 +89,28 @@ return [
     | touches the linked server and builds one FY in ~22s on dev, so the real
     | figure is very likely far smaller and this can be tightened.
     |
+    | PHASE 3 adds the two cache settings below. They exist SEPARATELY from
+    | ledger.cache on purpose: the requisition pages version their filter lists
+    | against dbo.FinanceRequisitionRefresh (see
+    | App\Concerns\VersionsRequisitionCache), because the two snapshots are
+    | built by two STEPS of one Agent job and can legitimately diverge. Sharing
+    | the ledger's knobs would work today and would quietly become wrong the
+    | first time someone tuned one of them.
+    |
+    | cache_minutes is only a backstop — the version stamp is the primary
+    | invalidation, exactly as for the ledger.
+    |
     */
 
     'requisition' => [
         'max_run_drift_minutes' => (int) env('FINANCE_REQUISITION_MAX_DRIFT_MINUTES', 180),
+        'cache_minutes' => (int) env('FINANCE_REQUISITION_CACHE_MINUTES', 10),
+
+        // How long the RefreshedAt probe is cached. It gates every requisition
+        // cache key AND is rendered on the page as "last refreshed", so it must
+        // stay short: a user must never be told the data is fresher than the
+        // cache they are being served from.
+        'version_seconds' => (int) env('FINANCE_REQUISITION_VERSION_SECONDS', 60),
     ],
 
 ];

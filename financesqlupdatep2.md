@@ -1,8 +1,10 @@
 # Phase 2 — Requisition-line detail (data layer)
 
-**Status: BUILT, AND RE-VERIFIED 2026-08-27 AGAINST A FRESH PRODUCTION RESTORE ON DEV.
-Not yet deployed to production.** Phase 1 (the ledger summary) is live since 2026-08-26.
-All 15 fiscal years now reconcile with 0 mismatches — see the final section of this file.
+**Status: LIVE IN PRODUCTION since 2026-08-27.** Phase 1 (the ledger summary) is live since
+2026-08-26. All 15 fiscal years reconcile with 0 mismatches, on dev and on production.
+
+The deployment record, production timings and what remains outstanding are in
+`financesqlupdateprogress.md` — **that file is the log; this one is the design.**
 
 Split out of `financesqlupdate.md` on 2026-08-26, which now covers Phase 1 only. Progress,
 incidents and open TODOs for **all** phases are recorded in `financesqlupdateprogress.md` — this

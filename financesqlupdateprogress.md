@@ -8,9 +8,19 @@ progress log for all phases.**
 **Status: Phase 1 is LIVE in production as of 2026-08-26.** Steps 1–10 of the runbook are
 complete; Step 11 (merge, and dropping the backup tables) is deliberately outstanding.
 
-**Phase 2 (the requisition-detail data layer) is BUILT, and RE-VERIFIED 2026-08-27 against a
-fresh PRODUCTION RESTORE on dev — all 15 fiscal years reconcile, 0 mismatches. It is NOT deployed
-to production.** See the Phase 2 sections at the foot of this file.
+**Phase 3 (the two requisition detail pages) is BUILT as of 2026-08-27, NOT YET DEPLOYED.** It
+changes no SQL object, so there is no runbook and no rollback script — shipping it is an ordinary
+app release. See the Phase 3 section at the foot of this file.
+
+**Phase 2 (the requisition-detail data layer) is LIVE IN PRODUCTION as of 2026-08-27.** Steps 1-9
+of `instructionsphase2.md` are complete; every gate passed first time. 106,410 rows, 22,325
+accounts reconciled, **0 mismatches**, all 13 ledger fiscal years gated. See the Phase 2 sections
+at the foot of this file.
+
+**Outstanding and important: there is NO MONITORING.** The health-check scheduled task was never
+created on production, and Database Mail is not configured. Both are written and ready
+(`scripts/register-health-check-task.ps1`, `sql/FinanceDatabaseMail.sql`) but neither has been
+applied. This predates Phase 2 — Phase 1 has been unmonitored since 2026-08-26.
 
 ---
 
@@ -305,7 +315,8 @@ Any worked example naming a specific user is a dated observation. Re-measure; ne
 
 ## Phase 2 — BUILT AND VERIFIED ON DEV, 2026-08-26
 
-**Status: the data layer is implemented and proven on dev. Nothing is deployed to production.**
+**Status: LIVE IN PRODUCTION since 2026-08-27** (this section records the build and dev
+verification that preceded it; the deployment record is the last section of this file).
 Design and the full as-built record are in `financesqlupdatep2.md`; this is the log entry.
 
 Items 9 and 10 above are the decisions this implements. Both stand — three-way access join,
@@ -482,3 +493,213 @@ discovered from an alert.
     `vw_FinanceRequisitionDetailUnscoped` and `FinanceRequisitionRefresh` all exist on dev. Note
     for Phase 3: the refresh log is run-keyed, so version its filter caches against
     `MAX(RefreshedAt) WHERE Outcome = 'OK'`, not against `FinanceLedgerRefresh`.
+
+---
+
+## PHASE 2 IS LIVE IN PRODUCTION — 2026-08-27
+
+Deployed by hand from `instructionsphase2.md`, steps 1–9. Every gate passed on the first attempt;
+nothing was rolled back and nothing was forced.
+
+### What the production build measured
+
+| | Production, 2026-08-27 | Dev restore, for comparison |
+|---|---|---|
+| Rows | **106,410** / 15 fiscal years / 1,644 accounts | 106,410 |
+| Accounts reconciled | **22,325** | 22,325 |
+| **Mismatches** | **0** | 0 |
+| `ReconStaleYearDrift` | **0** | 0 |
+| `DuplicateGrainRows` | **0** | 0 |
+| `UnparsedSegmentRows` | 685 | 685 |
+
+**All 13 ledger fiscal years were inside the 36h window, so every one was GATED, not merely
+recorded.** FY2026/FY2025 were 15h old (the 21:30 nightly run), FY2014–FY2024 were 27h old (the
+Phase 1 manual rebuild of 2026-08-26 09:33–09:42). Deploying the same day is what bought the fully
+enforced first run — a day later and the eleven closed years would have fallen outside the window
+until the 1 September full rebuild.
+
+Shape by fiscal year matched the sizing table in `financesqlupdatep2.md` exactly:
+FY2026 20,647 rows / 697 accounts, FY2025 16,538 / 606, FY2024 14,163 / 450.
+
+Read back through the views: **no fan-out**, and every user/fiscal-year combination tied to
+`vw_FinanceLedger` with `diff_approved` and `diff_routing` both `0.0000`, across eleven fiscal
+years for `KCHARLES1`. The scoped view dropped exactly the two known off-line-3 accounts,
+`4-80600-H01-401-0627-00-000` (SPECIAL PROJECT-PROPERTY) and `4-81500-H01-307-0601-00-000`
+(WASTE DISPOSALS).
+
+### The Agent job, end to end
+
+| Step | Status | Duration |
+|---|---|---|
+| 1 `Refresh snapshot` | succeeded | **2m 44s** |
+| 2 `Refresh requisition detail` | succeeded | **32s** |
+| Job outcome | **succeeded** | **3m 17s** |
+
+The job outcome row reads *"The last step to run was step 2 (Refresh requisition detail)"* — the
+proof that step 7a's `on_success_action = 3` took effect. Every prior run in the history ends
+*"...was step 1"*.
+
+Both steps executed as `NT SERVICE\SQLAgent$SQLEXPRESS`, which also confirms the step 6 grants are
+sufficient.
+
+**Phase 2 costs the nightly window about 32 seconds.** Prior step-1-only runs in the history
+ranged 2m 50s to 9m 01s, so the addition is well inside the job's existing variance.
+
+`drift_minutes = 0` (ledger 12:58:16, requisition 12:58:43). `php artisan ledger:status` returned
+**exit 0** with `outcome OK, drift 0 min`.
+
+### Production timings, replacing the dev estimates
+
+The header note in `sql/FinanceRequisition.sql` and the aftercare item in `instructionsphase2.md`
+were written against a dev restore. The production figures:
+
+* requisition build (step 2): **32s**
+* ledger build, current + prior FY (step 1): **2m 44s**
+* whole job: **3m 17s**
+
+### Finding — four fiscal years have no ledger counterpart
+
+The requisition snapshot holds **FY2010–FY2026**; `FinanceLedgerRefresh` holds **FY2014–FY2026**.
+So **FY2010, 2011, 2012 and 2013 exist in the detail with no summary at all** — 9,174 rows
+(4,379 / 4,385 / 399 / 11).
+
+**This is correct, and the reconciliation is unaffected.** The gate excludes fiscal years the
+ledger has never built, because there is nothing on the other side to compare against — which is
+why `ReconAccountsCompared` came to 22,325, exactly the ledger's row count. It is also consistent
+with existing behaviour: `vw_BudgetAllocation` holds FY2025+ while `dbo.MonthlyExpenditure` goes
+back to FY2014, and the differing rails are documented source data.
+
+**It is a Phase 3 design note, not a defect.** A fiscal-year rail built from the requisition
+snapshot would offer FY2010–2013, and a user selecting one would see requisition detail that
+cannot be drilled back to any summary. Phase 3 should bound the rail to years the ledger has, or
+label those years explicitly.
+
+This was not visible on dev: every drift query there joined to `FinanceLedgerRefresh`, so the four
+years were silently excluded from the comparison tables too. It surfaced only when the production
+Step 5 shape query listed all fifteen years.
+
+### Two things found during deployment that were NOT about Phase 2
+
+**1. The production application path was wrong in five files.** Production is
+`C:\Apache24\htdocs\production\finance-automation-system`; every script and document said
+`...\production\finance`. Corrected in `scripts/check-ledger-health.ps1` (the `$appPath` that
+actually matters), `instructionsforschedule.md` (3 places), `scripts/refresh-ledger.ps1`,
+`scripts/manage-ledger.bat` and `instructionsphase2.md`.
+
+Only the first was load-bearing: `check-ledger-health.ps1` aborts at *"Project root not found"*
+before reaching `ledger:status`, which is indistinguishable from healthy silence.
+
+**2. The health-check scheduled task does not exist on production.** It was never created. So the
+`ledger:status` extension this phase delivers — the only thing that can see a step-2-only failure
+— is currently a command nobody runs. **This is the largest outstanding gap and it predates
+Phase 2**; Phase 1 has been running unmonitored since 2026-08-26.
+
+`scripts/register-health-check-task.ps1` was written to close it: it validates the app root, PHP,
+the health script, and that `$appPath` inside the script matches the task's target, then proves
+`ledger:status` runs before registering.
+
+### Alerting — written, not yet applied
+
+Neither of these has been run on production:
+
+* `sql/FinanceDatabaseMail.sql` + `instructionsdatabasemail.md` — Database Mail and the job's
+  operator notification, in T-SQL and as an SSMS walkthrough.
+* `scripts/register-health-check-task.ps1` — the scheduled task.
+
+They cover **different halves** and neither substitutes for the other. Database Mail alerts on a
+job that runs and fails; it sends nothing when the Agent service is stopped, the job is disabled,
+or the job is deleted, because nothing fires. A disabled job never fails, so it never emails, and
+the data goes stale identically. Only the web-server task catches that, because it is the one
+monitor in a different failure domain from the thing it monitors.
+
+### Phase 2 TODO — what remains
+
+19. **Register the health check task** — `scripts/register-health-check-task.ps1` on the web box.
+    Highest priority of anything on this list: without it there is no monitoring at all.
+20. **Configure Database Mail** — `sql/FinanceDatabaseMail.sql` (or `instructionsdatabasemail.md`).
+    Needs SMTP server, port, from-address, recipient, and whether the relay is anonymous or
+    authenticated. **Run section 7** afterwards; it is the only end-to-end proof that a failing job
+    actually emails anyone.
+21. **Tighten two thresholds now that production timings are known.**
+    `FINANCE_REQUISITION_MAX_DRIFT_MINUTES` is 180; measured drift was **27 seconds**, and it is
+    structurally bounded by step 2's duration regardless of how long the ledger takes, so 15–30
+    minutes is safe and far sharper. `@ReconMaxLedgerAgeHours` (36) can also be revisited.
+22. **Watch the first unattended 21:30 run** (2026-08-27 evening) and confirm `ledger:status`
+    still exits 0 the next morning with a small drift. That is the first time the two-step job runs
+    without anyone watching.
+23. **Commit and merge.** Nothing from Phase 2 is in git — 8 modified files and 8 new ones on
+    `feature/ledger-oversight-update`, plus Phase 1's outstanding item 3.
+24. **Phase 3 is unblocked**, with two notes carried forward: version filter caches against
+    `dbo.FinanceRequisitionRefresh` (not `FinanceLedgerRefresh`), and decide what to do about
+    FY2010–2013 having no summary counterpart.
+
+---
+
+## PHASE 3 IS BUILT — 2026-08-27 (not yet deployed)
+
+The two requisition detail pages, their controllers, routes and tests. **No SQL object changed**,
+so there is no production runbook and no rollback script; deployment is whatever ships the app.
+
+**Named `Encumbered Details` (`/encumbered-details`) and `Routing Details` (`/routing-details`)** —
+not the "Approved / Routing Requisitions" the Phase 3 plan used throughout. The ledger columns are
+still `Approved` and `Routing` and the status sets are unchanged (AP/PO and RT/HD/PN); only the
+user-facing names differ, and each page states which summary column it drills into.
+
+The full as-built record — the four open items and how each was decided, the file list, and the
+frontend reasoning — is at the foot of `financesqlupdatep3.md`.
+
+Two things changed after the first cut, both on review:
+
+* **The table now scrolls exactly like Department Expenditure** — frozen header, frozen totals row,
+  frozen Requisition/Line columns on the left and the money column on the right, and arrow keys
+  that scroll one column at a time. The scroll core was **extracted out of `useLedgerTable` into
+  `composables/useTableScroll.js`**, which `useLedgerTable` now consumes, so there is one
+  implementation for every wide table rather than two. Only the month-axis half of that composable
+  (crosshair, heat shading) stays behind, because it has nothing to shade here.
+* **The two pages sit in the Finance section**, not a separate "Requisitions" one.
+
+### The two carried-forward notes, both handled
+
+**Item 24a — FY2010-2013 with no summary counterpart.** The fiscal-year rail is **bounded to years
+the ledger also has, per user**, and the withheld years are **named on the page** rather than
+silently dropped: *"FY 2010, 2011, 2012, 2013 have requisition detail but no budget ledger, so they
+are not offered here."* Bounding on its own would have been indistinguishable from lost data.
+Asserted both ways by
+`RequisitionDetailTest::test_the_fiscal_year_rail_is_bounded_to_years_the_ledger_has`.
+
+**Item 24b — cache versioning.** `App\Concerns\VersionsRequisitionCache` is a **sibling** of
+`VersionsLedgerCache`, stamping keys with `md5(MAX(RefreshedAt) WHERE Outcome = 'OK')` from
+`dbo.FinanceRequisitionRefresh`, honouring the run-keyed shape. The controller also reads the
+ledger's stamp — for the ledger-years key alone — through a private method rather than by mixing
+both traits into one class, because two near-identical method names on one object is exactly how
+the wrong table gets used.
+
+### Measured
+
+| | |
+|---|---|
+| New tests | **28** (12 offline unit, 16 feature across the two pages), **266 assertions** |
+| Result | all passing against **real** SQL Server data — the feature tests ran rather than skipping |
+| Frontend | `npm run build` clean |
+| Pint | clean, changed files only |
+
+The outage test is worth knowing about: it forces a real connection failure (loopback port 1,
+`login_timeout` 1) **after flushing the `file` store**, then asserts the outage prop key list is
+identical to the healthy one. Without that flush a warm filter cache serves the page straight past
+the broken connection and the test proves nothing.
+
+### Phase 3 TODO
+
+25. **Ship it.** Nothing to deploy on the database. On the web server this is an app release —
+    `npm run build` output included — followed by `php artisan cache:clear file`, since the new
+    pages introduce new cache keys and the shared ledger-years key is now read by two controllers.
+26. **Deep-link from the summary.** The Allocation Line Expenditure page shows Approved and
+    Routing per account and could link each figure into the matching filtered detail
+    (`?fy=…&account=…`). The obvious next increment; deliberately not in this change.
+27. **Watch the row counts on a real user.** The pages execute one query and derive in memory,
+    sized against a measured worst case of 3,408 rows for a single user/FY. If an access mapping
+    ever widens substantially, re-measure before assuming that still holds.
+28. **Everything on the Phase 2 list still stands** — items 19-23, and the health-check scheduled
+    task (19) remains the largest outstanding gap in the whole project. Phase 3 adds a second
+    consumer of the requisition snapshot, which makes a silent step-2 failure visible to more
+    people, not fewer.

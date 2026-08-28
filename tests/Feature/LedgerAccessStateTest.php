@@ -38,6 +38,11 @@ class LedgerAccessStateTest extends TestCase
             'monthly expenditure' => ['/monthly-expenditure', 'Expenditure/Monthly Expenditure'],
             'department expenditure' => ['/department-expenditure', 'Expenditure/Department Expenditure'],
             'allocation line expenditure' => ['/allocation-line-expenditure', 'Expenditure/Allocation Line Expenditure'],
+            // Phase 3. Backed by the requisition snapshot rather than the ledger,
+            // but scoped through the SAME vw_WebAppUserAccess join, so the three
+            // states and the hasAccess contract apply unchanged.
+            'encumbered details' => ['/encumbered-details', 'Expenditure/Encumbered Details'],
+            'routing details' => ['/routing-details', 'Expenditure/Routing Details'],
         ];
     }
 

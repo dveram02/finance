@@ -5,8 +5,10 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BudgetAllocationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DepartmentExpenditureController;
+use App\Http\Controllers\EncumberedDetailsController;
 use App\Http\Controllers\MonthlyExpenditureController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RoutingDetailsController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -28,6 +30,12 @@ Route::middleware(['auth', 'active.user'])->group(function () {
     Route::get('/monthly-expenditure', [MonthlyExpenditureController::class, 'index'])->name('monthly-expenditure.index');
     Route::get('/department-expenditure', [DepartmentExpenditureController::class,   'index'])->name('department-expenditure.index');
     Route::get('/allocation-line-expenditure', [AllocationLineExpenditureController::class, 'index'])->name('allocation-line-expenditure.index');
+
+    // Requisition-line drill-downs behind the ledger's Approved and Routing
+    // columns (Phase 3). Same access rule as every other page — the department
+    // mapping is inherited through vw_WebAppUserAccess, and there are no roles.
+    Route::get('/encumbered-details', [EncumberedDetailsController::class, 'index'])->name('encumbered-details.index');
+    Route::get('/routing-details', [RoutingDetailsController::class,  'index'])->name('routing-details.index');
 });
 
 // Logout
