@@ -4,7 +4,7 @@ import { onMounted, onUnmounted } from 'vue'
  * Left/right arrow keys step between fiscal years.
  *
  * For the pages whose arrows mean only that. The two wide ledger tables
- * (Department Expenditure, Allocation Line Expenditure) have context-sensitive
+ * (Monthly Expenditure, Variance) have context-sensitive
  * arrows — months while the pointer is in the table, years otherwise — and get
  * theirs from useLedgerTable(), which delegates the year step back to the page
  * via onPrevYear/onNextYear. That is the right seam; do not fold these two

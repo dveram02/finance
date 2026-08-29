@@ -124,7 +124,7 @@ main::-webkit-scrollbar-thumb:hover {
 }
 
 /* ============================================================================
-   Ledger tables (Department Expenditure, Allocation Line Expenditure, …)
+   Ledger tables (Monthly Expenditure, Variance, the requisition detail pages)
 
    The wide fiscal-year tables share their mechanics — frozen header, frozen
    totals row, frozen identity columns, column crosshair, quarter rules. Those

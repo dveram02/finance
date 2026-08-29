@@ -5,8 +5,10 @@ namespace App\Concerns;
 use Illuminate\Support\Collection;
 
 /**
- * Pure shaping helpers for the Allocation Line Expenditure page — no database,
- * no dates, no request. Extracted so the allocation rule itself can be tested
+ * Pure shaping helpers for the Variance page (formerly Allocation Line
+ * Expenditure) — no database, no dates, no request. The trait keeps its name
+ * because the row grain it shapes is still the allocation LINE; only the page
+ * was renamed. Extracted so the allocation rule itself can be tested
  * offline, the way DashboardDataTransforms is: the ledger tests skip when SQL
  * Server is unreachable, which means without this the rule would have no
  * regression net in CI at all.

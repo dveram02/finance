@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Concerns\DerivesAllocationLines;
 use App\Concerns\ResolvesFiscalYear;
 use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
@@ -15,17 +16,29 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Department expenditure — one row per account for a fiscal year, with the 12
- * fiscal months across and a YTD total.
+ * Variance — allocation against actual spend, per account line, for a fiscal
+ * year. Renamed from "Allocation Line Expenditure"; the row grain is still the
+ * allocation LINE, which is why DerivesAllocationLines keeps its name.
  *
- * Reads dbo.vw_FinanceLedger, which already carries the months pivoted, so the
- * page needs one query per request. The per-user set is small (the ledger is
- * scoped to the departments a user's positions grant), so the filter option
- * lists, stats and pagination are all derived in memory from that one result —
- * the same shape BudgetAllocationController uses.
+ * Reads dbo.vw_FinanceLedger. Since 2026-08-25 the allocation rule is:
+ *
+ *     ActualExpenditure = YTDTotal + Approved
+ *     Excess            = MAX(0, YTDTotal - Allocation)
+ *     AllocationBalance = MAX(0, Allocation - YTDTotal)
+ *
+ * so the balance is measured against POSTED GL SPEND alone. Approved is shown
+ * and counted into the reported "actual" but does not reduce the balance;
+ * Routing does neither and is carried for information. The page therefore
+ * reconciles on screen — Allocation minus YTD Expenditure IS the balance — and
+ * the Vue table says so in a tooltip, because a user who sees a larger "actual"
+ * beside an unreduced balance will otherwise assume the page is broken.
+ *
+ * The arithmetic itself lives in DerivesAllocationLines so it can be unit
+ * tested without SQL Server; see financesqlupdate.md to revert the rule.
  */
-class DepartmentExpenditureController extends Controller
+class VarianceController extends Controller
 {
+    use DerivesAllocationLines;
     use ResolvesFiscalYear;
     use ResolvesLedgerAccess;
     use VersionsLedgerCache;
@@ -38,7 +51,7 @@ class DepartmentExpenditureController extends Controller
     public function index(Request $request): Response
     {
         $username = $request->user()->username;
-        $filters = $request->only('cluster', 'institution', 'responsibility', 'department', 'fy');
+        $filters = $request->only('cluster', 'institution', 'department', 'description', 'account', 'fy');
         $currentFiscalYear = $this->currentFiscalYear();
 
         try {
@@ -54,7 +67,7 @@ class DepartmentExpenditureController extends Controller
             return $this->unavailable($request, $filters, $currentFiscalYear, $e);
         }
 
-        // ── Filter option lists (scoped to what the active FY actually contains) ──
+        // ── Filter option lists (scoped to what the active FY contains) ──────────
         $clusters = $rows->pluck('ClusterName')->filter()->unique()->sort()->values()->all();
 
         $institutions = $rows
@@ -64,8 +77,17 @@ class DepartmentExpenditureController extends Controller
             ->values()
             ->all();
 
-        $responsibilities = $rows->pluck('Responsibility')->filter()->unique()->sort()->values()->all();
         $departments = $rows->pluck('DepartmentName')->filter()->unique()->sort()->values()->all();
+        $descriptions = $rows->pluck('AccountDescription')->filter()->unique()->sort()->values()->all();
+
+        // Account numbers are shown with their description, since the number
+        // alone is unreadable. Ordered by description so the list is scannable.
+        $accounts = $rows
+            ->map(fn ($r) => ['AccountNumber' => $r['AccountNumber'], 'AccountDescription' => $r['AccountDescription']])
+            ->unique('AccountNumber')
+            ->sortBy(fn ($a) => $a['AccountDescription'].$a['AccountNumber'])
+            ->values()
+            ->all();
 
         // ── Apply filters ────────────────────────────────────────────────────────
         // Only honour a selection that is a valid option in the active FY, so a
@@ -82,57 +104,43 @@ class DepartmentExpenditureController extends Controller
             $filtered = $filtered->where('InstitutionName', $filters['institution']);
         }
 
-        $filters['responsibility'] = ($v = $request->input('responsibility')) && in_array($v, $responsibilities, true) ? $v : null;
-        if ($filters['responsibility']) {
-            $filtered = $filtered->where('Responsibility', $filters['responsibility']);
-        }
-
         $filters['department'] = ($v = $request->input('department')) && in_array($v, $departments, true) ? $v : null;
         if ($filters['department']) {
             $filtered = $filtered->where('DepartmentName', $filters['department']);
         }
 
+        $filters['description'] = ($v = $request->input('description')) && in_array($v, $descriptions, true) ? $v : null;
+        if ($filters['description']) {
+            $filtered = $filtered->where('AccountDescription', $filters['description']);
+        }
+
+        $filters['account'] = ($v = $request->input('account')) && in_array($v, array_column($accounts, 'AccountNumber'), true) ? $v : null;
+        if ($filters['account']) {
+            $filtered = $filtered->where('AccountNumber', $filters['account']);
+        }
+
         $filtered = $filtered->values();
 
-        // ── Stats and column totals over the whole filtered set ──────────────────
-        // Deliberately computed before pagination: a totals row that only summed
-        // the visible 25 rows would look authoritative and be wrong.
-        $monthTotals = [];
-        foreach (self::MONTHS as $m) {
-            $monthTotals[$m] = round((float) $filtered->sum($m), 2);
-        }
-
-        // Ranked on a copy — sorting $monthTotals itself would destroy the fiscal
-        // month ordering the totals row depends on.
-        $highestMonthKey = null;
-        if ($filtered->isNotEmpty()) {
-            $ranked = $monthTotals;
-            arsort($ranked);
-            $highestMonthKey = array_key_first($ranked);
-        }
-
-        $grandTotal = round((float) $filtered->sum('YTDTotal'), 2);
+        // ── Totals over the whole filtered set, before pagination ────────────────
+        // A totals row that only summed the visible page would look authoritative
+        // and be wrong.
+        $totals = $this->allocationTotals($filtered, self::MONTHS);
 
         $stats = [
-            'totalExpenditure' => $grandTotal,
-            'highestMonth' => [
-                'label' => $highestMonthKey ? $this->monthLabel($highestMonthKey, (int) $activeFiscalYear) : null,
-                'amount' => $highestMonthKey ? $monthTotals[$highestMonthKey] : 0.0,
-            ],
+            'totalAllocation' => $totals['allocation'],
+            'totalExpenditure' => $totals['ytd'],
+            'balance' => $totals['balance'],
+            'exceededCount' => $totals['exceededCount'],
             'accountCount' => $filtered->count(),
         ];
 
-        $totals = [
-            'months' => $monthTotals,
-            'ytd' => $grandTotal,
-        ];
-
-        return Inertia::render('Expenditure/Department Expenditure', [
+        return Inertia::render('Expenditure/Variance', [
             'rows' => $this->paginate($request, $filtered),
             'clusters' => $clusters,
             'institutions' => $institutions,
-            'responsibilities' => $responsibilities,
             'departments' => $departments,
+            'descriptions' => $descriptions,
+            'accounts' => $accounts,
             'years' => $years->all(),
             'months' => $this->monthHeadings((int) $activeFiscalYear),
             'stats' => $stats,
@@ -172,17 +180,18 @@ class DepartmentExpenditureController extends Controller
     }
 
     /**
-     * One row per account for the year, as plain arrays.
-     *
-     * Not cached: the table and its stats stay live, matching the other data
-     * pages. Only the derived option lists are cached.
+     * One row per account line for the year, as plain arrays.
      *
      * @return Collection<int,array<string,mixed>>
      */
     private function ledgerRows(string $username, string $fiscalYear): Collection
     {
         $columns = array_merge(
-            ['FinancialYear', 'ClusterName', 'InstitutionName', 'Responsibility', 'DepartmentName', 'AccountNumber', 'AccountDescription', 'YTDTotal'],
+            [
+                'FinancialYear', 'ClusterName', 'InstitutionName', 'Responsibility', 'DepartmentName',
+                'AccountNumber', 'AccountDescription', 'Allocation', 'Approved', 'Routing',
+                'YTDTotal', 'ActualExpenditure', 'Excess', 'AllocationBalance',
+            ],
             self::MONTHS,
         );
 
@@ -194,16 +203,9 @@ class DepartmentExpenditureController extends Controller
             ->orderBy('DepartmentName')
             ->orderBy('AccountNumber')
             ->get()
-            ->map(function ($row) use ($columns) {
-                $out = [];
-                foreach ($columns as $column) {
-                    $out[$column] = in_array($column, self::MONTHS, true) || $column === 'YTDTotal'
-                        ? (float) $row->{$column}
-                        : $row->{$column};
-                }
-
-                return $out;
-            });
+            ->map(fn ($row) => $this->deriveAllocationLine(
+                (array) $row->getAttributes(), $columns, self::MONTHS
+            ));
     }
 
     // =========================================================================
@@ -227,10 +229,6 @@ class DepartmentExpenditureController extends Controller
     }
 
     /**
-     * Column headings for the 12 fiscal months, e.g. ['key' => 'Oct',
-     * 'label' => 'OCT', 'year' => '25', 'future' => false]. `future` lets the
-     * page mute months that have not happened yet in the active fiscal year.
-     *
      * @return array<int,array{key:string,label:string,year:string,future:bool,quarterStart:bool}>
      */
     private function monthHeadings(int $fiscalYear): array
@@ -255,21 +253,14 @@ class DepartmentExpenditureController extends Controller
         return $out;
     }
 
-    private function monthLabel(string $key, int $fiscalYear): string
-    {
-        $periodId = array_search($key, self::MONTHS, true) + 1;
-
-        return $this->fiscalMonthLabels($fiscalYear)[$periodId] ?? strtoupper($key);
-    }
-
     /**
      * SQL Server is unreachable — render an explicitly EMPTY page, never a
-     * zero-valued one. A dashboard reading "TTD 0 spent" during an outage is
-     * indistinguishable from a real answer; an empty table with a warning is not.
+     * zero-valued one. "TTD 0 allocated" during an outage is indistinguishable
+     * from a real answer; an empty table with a warning is not.
      */
     private function unavailable(Request $request, array $filters, int $currentFiscalYear, \Throwable $e): Response
     {
-        Log::error('Department expenditure query failed.', [
+        Log::error('Allocation line expenditure query failed.', [
             'username' => $request->user()->username,
             'fy' => $request->input('fy'),
             'exception' => $e->getMessage(),
@@ -279,26 +270,29 @@ class DepartmentExpenditureController extends Controller
 
         $filters['fy'] = $filters['fy'] ?? $currentFiscalYear;
 
-        return Inertia::render('Expenditure/Department Expenditure', [
+        return Inertia::render('Expenditure/Variance', [
             'rows' => new LengthAwarePaginator([], 0, self::PER_PAGE, 1, [
                 'path' => $request->url(),
                 'query' => $request->query(),
             ]),
             'clusters' => [],
             'institutions' => [],
-            'responsibilities' => [],
             'departments' => [],
+            'descriptions' => [],
+            'accounts' => [],
             'years' => [],
             'months' => $this->monthHeadings((int) $filters['fy']),
             'stats' => [
+                'totalAllocation' => 0,
                 'totalExpenditure' => 0,
-                'highestMonth' => ['label' => null, 'amount' => 0],
+                'balance' => 0,
+                'exceededCount' => 0,
                 'accountCount' => 0,
             ],
-            'totals' => [
-                'months' => array_fill_keys(self::MONTHS, 0),
-                'ytd' => 0,
-            ],
+            // Same key set as the success path, zeroed — asserted by the unit
+            // suite, because a prop present on one path and missing on the
+            // other is a Vue error stacked on top of an outage.
+            'totals' => $this->emptyAllocationTotals(self::MONTHS),
             'filters' => $filters,
             'activeFiscalYear' => $filters['fy'],
             'currentFiscalYear' => $currentFiscalYear,

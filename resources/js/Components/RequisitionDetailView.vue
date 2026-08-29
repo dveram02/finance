@@ -16,7 +16,7 @@ import { useTableScroll } from '@/composables/useTableScroll'
  * implementation is what stops the two drifting apart the way the fiscal-year
  * hero did before it was extracted.
  *
- * The table scrolls exactly like Department Expenditure — frozen header, frozen
+ * The table scrolls exactly like Monthly Expenditure — frozen header, frozen
  * totals row, frozen identity and money columns, one-column arrow-key scrolling
  * — because it shares the mechanics: the CSS in app.css (`ledger-table`) and
  * useTableScroll(), which was extracted from useLedgerTable() for this page.
@@ -93,7 +93,7 @@ const goToFy = (fy) => {
 
 // ── Wide-table scrolling and the arrow keys ─────────────────────────────────
 // Arrows scroll the table while the pointer or focus is in it, and step fiscal
-// years otherwise — the same split Department Expenditure uses. Returning false
+// years otherwise — the same split Monthly Expenditure uses. Returning false
 // when there is no adjacent year lets the composable leave the event alone
 // rather than swallowing it at the ends of the rail.
 const stepYear = (fy) => {
@@ -414,7 +414,7 @@ const formatDate = (value) => {
              columns, this order. Do not add, drop or reorder without changing the
              reference queries too — these pages exist to show that result set.
 
-             Mechanically the same wide table as Department Expenditure: frozen
+             Mechanically the same wide table as Monthly Expenditure: frozen
              header, frozen totals row, frozen identity columns, and arrow keys
              that scroll one column at a time. Shared via `ledger-table` in
              app.css and useTableScroll. -->
@@ -632,7 +632,7 @@ const formatDate = (value) => {
 <style scoped>
 /* ── Column widths and frozen offsets ──────────────────────────────────
    Only this table's column layout lives here; the mechanics are shared in
-   app.css with Department Expenditure and Allocation Line Expenditure. The
+   app.css with Monthly Expenditure and Variance. The
    frozen columns' `left` values are the running sum of the widths before them,
    so widths and offsets are declared together at every breakpoint — splitting
    them apart is what lets them drift and open gaps between frozen columns.
@@ -699,6 +699,6 @@ const formatDate = (value) => {
 }
 
 /* Extended Cost is the figure the page exists to show; the gold rule marks it
-   the way Department Expenditure marks YTD. */
+   the way Monthly Expenditure marks YTD. */
 .col-money { border-left: 2px solid rgba(251, 191, 36, 0.4); }
 </style>

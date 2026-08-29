@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\DB;
 /**
  * Acts as a user who actually has finance ledger rows.
  *
- * The Department Expenditure and Allocation Line Expenditure pages used to
- * serve hardcoded fixtures, which made them testable anywhere. They now read
+ * The Monthly Expenditure and Variance pages used to serve hardcoded fixtures,
+ * which made them testable anywhere. They now read
  * dbo.vw_FinanceLedger, so these tests need both a reachable SQL Server and a
  * user with rows in it. There is no SQL Server in CI, so every test that needs
  * data skips rather than fails when it cannot get any — a red suite on a

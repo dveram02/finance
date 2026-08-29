@@ -1,14 +1,13 @@
 <?php
 
-use App\Http\Controllers\AllocationLineExpenditureController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BudgetAllocationController;
 use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\DepartmentExpenditureController;
 use App\Http\Controllers\EncumberedDetailsController;
 use App\Http\Controllers\MonthlyExpenditureController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RoutingDetailsController;
+use App\Http\Controllers\VarianceController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -27,9 +26,11 @@ Route::middleware(['auth', 'active.user'])->group(function () {
     Route::get('/dashboard', [DashboardController::class,        'index'])->name('dashboard');
     Route::get('/profile', [ProfileController::class,           'view'])->name('profile.view');
     Route::get('/budget-allocations', [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
+    // Account x fiscal-month grid from dbo.vw_FinanceLedger. It carries the name
+    // and the URL of the retired per-period page that read dbo.MonthlyExpenditure;
+    // that page is gone, and its URL is NOT redirected from its old one.
     Route::get('/monthly-expenditure', [MonthlyExpenditureController::class, 'index'])->name('monthly-expenditure.index');
-    Route::get('/department-expenditure', [DepartmentExpenditureController::class,   'index'])->name('department-expenditure.index');
-    Route::get('/allocation-line-expenditure', [AllocationLineExpenditureController::class, 'index'])->name('allocation-line-expenditure.index');
+    Route::get('/variance', [VarianceController::class, 'index'])->name('variance.index');
 
     // Requisition-line drill-downs behind the ledger's Approved and Routing
     // columns (Phase 3). Same access rule as every other page — the department

@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Http\Controllers\DepartmentExpenditureController;
+use App\Http\Controllers\MonthlyExpenditureController;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia;
@@ -10,7 +10,7 @@ use Tests\Feature\Concerns\UsesLedgerData;
 use Tests\TestCase;
 
 /**
- * The Department Expenditure page reads dbo.vw_FinanceLedger, so these tests
+ * The Monthly Expenditure page reads dbo.vw_FinanceLedger, so these tests
  * need a reachable SQL Server holding a populated snapshot; they skip when they
  * cannot get one (see UsesLedgerData). EnsureUserIsActive is excluded because
  * that middleware reaches the separate auth SQL Server.
@@ -22,7 +22,7 @@ use Tests\TestCase;
  * more than one cluster), the premise is guarded and skipped rather than
  * assumed, because the ledger content is not ours to control.
  */
-class DepartmentExpenditureTest extends TestCase
+class MonthlyExpenditureTest extends TestCase
 {
     use RefreshDatabase;
     use UsesLedgerData;
@@ -31,7 +31,7 @@ class DepartmentExpenditureTest extends TestCase
     {
         return $this->actingAs($this->ledgerUser())
             ->withoutMiddleware(EnsureUserIsActive::class)
-            ->get('/department-expenditure'.($query ? '?'.http_build_query($query) : ''));
+            ->get('/monthly-expenditure'.($query ? '?'.http_build_query($query) : ''));
     }
 
     /** @return array<int,array<string,mixed>> every row across every page */
@@ -55,7 +55,7 @@ class DepartmentExpenditureTest extends TestCase
         $this->visit()
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->component('Expenditure/Department Expenditure')
+                ->component('Expenditure/Monthly Expenditure')
                 ->has('rows.data')
                 ->has('clusters')
                 ->has('institutions')
@@ -76,7 +76,7 @@ class DepartmentExpenditureTest extends TestCase
 
     public function test_it_requires_authentication(): void
     {
-        $this->get('/department-expenditure')->assertRedirect('/login');
+        $this->get('/monthly-expenditure')->assertRedirect('/login');
     }
 
     public function test_the_page_is_not_empty_for_a_user_with_ledger_rows(): void
@@ -93,7 +93,7 @@ class DepartmentExpenditureTest extends TestCase
     {
         foreach ($this->allRows() as $row) {
             $sum = 0.0;
-            foreach (DepartmentExpenditureController::MONTHS as $month) {
+            foreach (MonthlyExpenditureController::MONTHS as $month) {
                 $this->assertArrayHasKey($month, $row, "Row is missing month {$month}.");
                 $sum += (float) $row[$month];
             }
@@ -112,7 +112,7 @@ class DepartmentExpenditureTest extends TestCase
         $props = $this->visit()->viewData('page')['props'];
         $all = $this->allRows();
 
-        foreach (DepartmentExpenditureController::MONTHS as $month) {
+        foreach (MonthlyExpenditureController::MONTHS as $month) {
             $this->assertEqualsWithDelta(
                 array_sum(array_map('floatval', array_column($all, $month))),
                 (float) $props['totals']['months'][$month],

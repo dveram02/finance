@@ -15,10 +15,9 @@ below was read off the current source.
 3. [Dashboard](#3-dashboard-dashboard)
 4. [Budget Allocations](#4-budget-allocations-budget-allocations)
 5. [Monthly Expenditure](#5-monthly-expenditure-monthly-expenditure)
-6. [Department Expenditure](#6-department-expenditure-department-expenditure)
-7. [Allocation Line Expenditure](#7-allocation-line-expenditure-allocation-line-expenditure)
-8. [Login and Profile](#8-login-and-profile)
-9. [Frequently asked questions](#9-frequently-asked-questions)
+6. [Variance](#6-variance-variance)
+7. [Login and Profile](#7-login-and-profile)
+8. [Frequently asked questions](#8-frequently-asked-questions)
 
 ---
 
@@ -42,7 +41,8 @@ dbo.FinanceLedgerSnapshot          one row per (FinancialYear, AccountNumber) �
         v
 dbo.vw_FinanceLedger               the app's read surface — adds UserName + 3 derived columns
         |                +--> dbo.vw_BudgetAllocation   (thin projection, Allocation <> 0)
-        |                +--> dbo.MonthlyExpenditure    (UNPIVOT to one row per month)
+        |                +--> dbo.MonthlyExpenditure    (UNPIVOT to one row per month;
+        |                                               read by the DASHBOARD only)
         v
 Laravel controllers -> Inertia props -> Vue pages
 ```
@@ -114,8 +114,9 @@ This is intended scope, not missing data. The Budget page header and both budget
   latest FY that has data.
 - **Cutoff** (how far "so far this year" reaches): 12 for a completed year, the current fiscal
   period for the year in progress, 0 for a year that has not started.
-- Budget Allocations holds **FY2025 onward only** (the source allocation table has no earlier rows);
-  Monthly Expenditure goes back to **FY2014**. The two pages' year rails legitimately differ in length.
+- Budget Allocations holds **FY2025 onward only** (the source allocation table has no earlier rows),
+  while the ledger behind Monthly Expenditure and Variance goes back to **FY2014**. The pages' year
+  rails legitimately differ in length.
 
 ### Who sees what
 
@@ -209,9 +210,10 @@ overage       = max(0, YTD Expenditure - Total Budget)
   the card shows "—" with the reason.
 
 > **Note for Finance:** this KPI measures usage against **posted GL spend only** (`YTDTotal`).
-> It does *not* include encumbrances. The Allocation Line Expenditure page is the view that measures
-> balance against `YTDTotal + Approved + Routing`. The two therefore answer different questions —
-> "what have we spent" versus "what is still genuinely available".
+> It does *not* include encumbrances. The **Variance** page is the view that sets posted spend
+> against the allocation line by line, and reports what is committed (`Approved`) and in the
+> pipeline (`Routing`) beside it. The two answer different questions — "what have we spent overall"
+> versus "which lines are over or under".
 
 ### KPI 3 — YTD Expenditure
 
@@ -324,43 +326,6 @@ Two rules worth explaining:
 
 ## 5. Monthly Expenditure (`/monthly-expenditure`)
 
-The most granular view: **one row per account per fiscal month**.
-
-**Source:** `dbo.MonthlyExpenditure` — an UNPIVOT of the 12 month columns in `vw_FinanceLedger`.
-`PeriodID` 1 = Oct … 12 = Sep; `TRXPeriod` is formatted `OCT, 25`.
-
-**Months with no activity produce no row.** A consequence: a month whose transactions net to exactly
-zero disappears rather than showing 0.00.
-
-### Table columns
-
-Year · Month · Cluster · Institution · Responsibility · Account · Category (`MainGroup`) · **Net Change**
-
-Sorted by Period, Cluster, Institution, Responsibility, Account Number, Line Number. 25 rows/page.
-
-### KPI cards
-
-| Card | Calculation |
-|---|---|
-| **Total Net Expenditure** | Sum of `SUM(NetChange)` grouped by month, over the whole filtered set |
-| **Highest Net Spend Month** | The month with the greatest **summed net** value in the filtered set |
-| **Top Net Spend Category** | `SUM(NetChange) GROUP BY MainGroup ORDER BY total DESC` — top 1 |
-
-"Net" is load-bearing throughout: values are netted of credits and corrections, so a month that is
-net-negative ranks *low*, not high.
-
-### Filters
-
-Fiscal Year · Cluster · Institution · Responsibility · Account · **Month (period)** · Category (MainGroup).
-
-Same scoping rules as Budget Allocations: options come only from the active fiscal year, and a
-selection that is not a valid option in that year is discarded rather than applied. Month options
-are ordered by `PeriodID` (fiscal order), not alphabetically.
-
----
-
-## 6. Department Expenditure (`/department-expenditure`)
-
 A wide, spreadsheet-style view: **one row per account, twelve months across, plus a YTD total.**
 
 **Source:** `vw_FinanceLedger` directly — the months come pre-pivoted, so the whole page is one
@@ -407,7 +372,7 @@ outside it, they **step fiscal years**. Never while a dropdown or text field has
 
 ---
 
-## 7. Allocation Line Expenditure (`/allocation-line-expenditure`)
+## 6. Variance (`/variance`)
 
 The budget-versus-actual view: **allocation against actual spend, per account line.** This is the
 page that answers "is this line over its budget, and by how much".
@@ -425,7 +390,7 @@ Column meanings:
 | Column | Calculation |
 |---|---|
 | **Allocation** | The approved budget for that account in that FY (`0040CBudgetsAllocation`) |
-| Month columns | Net GL movement per calendar month (same as Department Expenditure) |
+| Month columns | Net GL movement per calendar month (same as Monthly Expenditure) |
 | **Encumbered** | `Approved + Routing` — the commitment split is combined into one figure for display. Approved = requisitions at `AP`/`PO`; Routing = `RT`/`HD`/`PN` |
 | **YTD Expenditure** | `YTDTotal` — posted GL only |
 | **Balance of Allocation** | `Allocation − (YTD + Approved + Routing)`, **floored at zero** |
@@ -482,7 +447,7 @@ description); choosing a description narrows the account-number list.
 
 ---
 
-## 8. Login and Profile
+## 7. Login and Profile
 
 ### Login (`/login`)
 
@@ -504,7 +469,7 @@ login. There is no edit form — the source system owns these values.
 
 ---
 
-## 9. Frequently asked questions
+## 8. Frequently asked questions
 
 **"The Total Budget is far too low."**
 The portal covers **goods and services only** — the 41 reporting-line-3 account codes. Payroll,
@@ -522,14 +487,16 @@ Note that `0006BWebAppDepartmentControls` is **not read by anything** — a row 
 The department join is live and takes effect within about a minute, but the cached filter dropdown
 lists can linger up to 10 minutes. `php artisan cache:clear file` to see it at once.
 
-**"Budget Usage on the Dashboard doesn't match the Balance on Allocation Line Expenditure."**
-Correct, and intentional. Dashboard usage measures **posted spend only**. Allocation Line balance
-measures **posted spend plus commitments** (approved + routing requisitions), and floors each line
-at zero. They answer different questions.
+**"Budget Usage on the Dashboard doesn't match the Balance on Variance."**
+Correct, and intentional. The Dashboard measures usage across the whole allocation; Variance
+measures it **line by line** and floors each line at zero, so overspend on one account never nets
+off headroom on another (it is reported separately as Excess). Both measure balance against
+**posted GL spend alone** — since 2026-08-25, `Approved` is displayed and counted into the reported
+actual but does not reduce the balance, and `Routing` reduces nothing at all.
 
 **"Why does one page's fiscal-year list go back further than another's?"**
-Budget Allocations only has FY2025 onward (the source allocation table has nothing earlier);
-Monthly Expenditure goes back to FY2014. Source data, not a filter bug.
+Budget Allocations only has FY2025 onward (the source allocation table has nothing earlier); the
+ledger behind Monthly Expenditure and Variance goes back to FY2014. Source data, not a filter bug.
 
 **"How fresh are the numbers?"**
 As of the last successful nightly refresh (SQL Agent, 21:30). Permissions are live.

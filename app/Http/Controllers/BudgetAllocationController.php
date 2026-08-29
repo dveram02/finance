@@ -181,8 +181,8 @@ class BudgetAllocationController extends Controller
                 ->withQueryString();
 
         } catch (\Throwable $e) {
-            // See MonthlyExpenditureController — the generic copy must not hide the
-            // cause; this catch fires on any SQL failure, not just connectivity.
+            // The generic copy must not hide the cause; this catch fires on any
+            // SQL failure, not just connectivity.
             Log::error('Budget allocation query failed.', [
                 'username' => $username,
                 'fy' => $request->input('fy'),

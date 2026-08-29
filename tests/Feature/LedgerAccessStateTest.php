@@ -36,8 +36,7 @@ class LedgerAccessStateTest extends TestCase
             'dashboard' => ['/dashboard', 'Dashboard'],
             'budget allocations' => ['/budget-allocations', 'Budget/All Budget Allocations'],
             'monthly expenditure' => ['/monthly-expenditure', 'Expenditure/Monthly Expenditure'],
-            'department expenditure' => ['/department-expenditure', 'Expenditure/Department Expenditure'],
-            'allocation line expenditure' => ['/allocation-line-expenditure', 'Expenditure/Allocation Line Expenditure'],
+            'variance' => ['/variance', 'Expenditure/Variance'],
             // Phase 3. Backed by the requisition snapshot rather than the ledger,
             // but scoped through the SAME vw_WebAppUserAccess join, so the three
             // states and the hasAccess contract apply unchanged.
@@ -118,7 +117,7 @@ class LedgerAccessStateTest extends TestCase
         // The outage path flashes a warning; having no mapping is not an outage
         // and must not borrow its language.
         $this->actingAs(User::factory()->create())
-            ->get('/department-expenditure')
+            ->get('/monthly-expenditure')
             ->assertOk()
             ->assertSessionMissing('warning');
     }

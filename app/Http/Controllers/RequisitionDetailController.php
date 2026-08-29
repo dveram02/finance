@@ -198,7 +198,7 @@ abstract class RequisitionDetailController extends Controller
      *
      * Two caches, deliberately keyed to two different snapshots — the detail
      * years against the requisition refresh, the ledger years against the
-     * ledger's. The second reuses the key AllocationLineExpenditureController
+     * ledger's. The second reuses the key VarianceController
      * writes, the same way DashboardController shares the budget years key.
      *
      * @return array{years:array<int,string>,unsummarised:array<int,string>}

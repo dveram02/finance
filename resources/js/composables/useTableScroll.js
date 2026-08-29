@@ -4,7 +4,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
  * Horizontal scrolling for a wide table, and the arrow keys that drive it.
  *
  * Extracted from useLedgerTable so the requisition detail tables can have
- * IDENTICAL scroll behaviour to Department Expenditure without inheriting the
+ * IDENTICAL scroll behaviour to Monthly Expenditure without inheriting the
  * parts of that composable which only make sense against a 12-month axis (the
  * column crosshair and the per-row heat shading). useLedgerTable now builds on
  * this rather than duplicating it, so the two cannot drift apart.

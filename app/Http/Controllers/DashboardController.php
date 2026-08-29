@@ -122,7 +122,8 @@ class DashboardController extends Controller
      * with no budget line and leave two KPI cards dead. It also means the year
      * list reuses the exact cache key the Budget Allocations page writes, so
      * navigation costs no extra queries. FY2014-2024 expenditure history stays
-     * reachable from the Monthly Expenditure page.
+     * reachable from the Monthly Expenditure page, which reads the ledger and
+     * therefore covers years this rail does not offer.
      *
      * $requestedFy is raw request input (mixed, possibly an array).
      *

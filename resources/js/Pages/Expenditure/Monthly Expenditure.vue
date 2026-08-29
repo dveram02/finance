@@ -1,10 +1,10 @@
-﻿<script setup>
+<script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
-import NoAccessNotice from '@/Components/NoAccessNotice.vue'
 import FiscalYearHero from '@/Components/FiscalYearHero.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
-import { useFiscalYearNav } from '@/composables/useFiscalYearNav'
+import { useLedgerTable } from '@/composables/useLedgerTable'
+import NoAccessNotice from '@/Components/NoAccessNotice.vue'
 
 const props = defineProps({
     // False when the user maps to no department at all — a permanent state that
@@ -14,11 +14,11 @@ const props = defineProps({
     clusters:          Array,
     institutions:      Array,
     responsibilities:  Array,
-    accounts:          Array,
+    departments:       Array,
     months:            Array,
-    mainGroups:        Array,
     years:             Array,
     stats:             Object,
+    totals:            Object,
     filters:           Object,
     activeFiscalYear:  [Number, String],
     currentFiscalYear: [Number, String],
@@ -30,34 +30,9 @@ const filters = ref({
     cluster:        props.filters.cluster        ?? '',
     institution:    props.filters.institution    ?? '',
     responsibility: props.filters.responsibility ?? '',
-    account:        props.filters.account        ?? '',
-    // PeriodID is numeric but a <select> value is a string — keep it a string both
-    // ways so the echoed-back filter re-selects the active month after a reload.
-    period:         props.filters.period != null ? String(props.filters.period) : '',
-    group:          props.filters.group          ?? '',
+    department:     props.filters.department     ?? '',
     fy:             props.activeFiscalYear != null ? String(props.activeFiscalYear) : '',
 })
-
-// ── Fiscal year ─────────────────────────────────────────────────────────────────
-// FiscalYearHero already ignores a null or unchanged year, so no guards here.
-const goToFy = (fy) => {
-    filters.value.fy = String(fy)
-    applyFilters()
-}
-
-useFiscalYearNav({ fyNav: () => props.fyNav, goToFy })
-
-// ── Institution cascade ─────────────────────────────────────────────────────────
-const filteredInstitutions = computed(() => {
-    if (!filters.value.cluster) return props.institutions
-    return props.institutions.filter(i => i.ClusterName === filters.value.cluster)
-})
-
-// FY is always set, so it is excluded from the "refine" affordances.
-const activeFilterCount = computed(() =>
-    ['cluster', 'institution', 'responsibility', 'account', 'period', 'group']
-        .filter(k => filters.value[k] !== '' && filters.value[k] != null).length
-)
 
 // ── Navigation helpers ──────────────────────────────────────────────────────────
 const applyFilters = () => {
@@ -71,6 +46,11 @@ const applyFilters = () => {
     })
 }
 
+const goToFy = (fy) => {
+    filters.value.fy = String(fy)
+    applyFilters()
+}
+
 const onClusterChange = () => {
     filters.value.institution = ''
     applyFilters()
@@ -79,10 +59,33 @@ const onClusterChange = () => {
 const clearFilters = () => {
     filters.value = {
         cluster: '', institution: '', responsibility: '',
-        account: '', period: '', group: '', fy: filters.value.fy,
+        department: '', fy: filters.value.fy,
     }
     applyFilters()
 }
+
+// ── Institution cascade ─────────────────────────────────────────────────────────
+const filteredInstitutions = computed(() => {
+    if (!filters.value.cluster) return props.institutions
+    return props.institutions.filter(i => i.ClusterName === filters.value.cluster)
+})
+
+// FY is always set, so it is excluded from the "refine" affordances.
+const activeFilterCount = computed(() =>
+    ['cluster', 'institution', 'responsibility', 'department']
+        .filter(k => filters.value[k] !== '' && filters.value[k] != null).length
+)
+
+// ── Shared ledger-table behaviour ───────────────────────────────────────────────
+const {
+    scroller, canScroll, hoveredMonth, onTableHover, clearHover,
+    heatStyle, pointerInTable, tableFocused, arrowsScrollTable,
+} = useLedgerTable({
+    months: () => props.months ?? [],
+    rows: () => props.rows?.data ?? [],
+    onPrevYear: () => (props.fyNav?.prev != null ? goToFy(props.fyNav.prev) : false),
+    onNextYear: () => (props.fyNav?.next != null ? goToFy(props.fyNav.next) : false),
+})
 
 // ── Loading state (shown while a filter / FY / page reload is in flight) ─────────
 const loading = ref(false)
@@ -107,8 +110,8 @@ onUnmounted(() => {
 })
 
 // ── Formatting ──────────────────────────────────────────────────────────────────
-// Accounting style: negatives shown in parentheses, e.g. ($1,234.56). NetChange is
-// netted of correcting entries, so a value can be negative (a reversal).
+// Accounting style: negatives in parentheses, e.g. ($1,234.56). Net figures are
+// netted of correcting entries, so a value can legitimately be negative.
 const formatCurrency = (value) => {
     const n = Number(value ?? 0)
     const s = new Intl.NumberFormat('en-TT', { style: 'currency', currency: 'TTD' })
@@ -116,11 +119,29 @@ const formatCurrency = (value) => {
     return n < 0 ? `(${s})` : s
 }
 
-const isNegative = (value) => Number(value ?? 0) < 0
+// Month cells carry no currency symbol — twelve repeated "TTD$" glyphs is noise
+// that costs width and adds nothing. The symbol stays on the KPIs, and the
+// column group is labelled TTD in the header.
+const formatAmount = (value) => {
+    const n = Number(value ?? 0)
+    const s = new Intl.NumberFormat('en-TT', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(Math.abs(n))
+    return n < 0 ? `(${s})` : s
+}
 
-// Muted secondary category line, e.g. "GOODS AND SERVICES › MEDICAL, HARDWARE…".
-const subGroupLine = (row) =>
-    [row.SubGroupA, row.SubGroupB].filter(Boolean).join(' › ')
+const isNegative = (value) => Number(value ?? 0) < 0
+const isZero     = (value) => Number(value ?? 0) === 0
+
+// Native `title` tooltips are only useful when text is actually cut off. Setting
+// one unconditionally makes the browser echo back a label the user can already
+// read in full, which just looks like stray text on hover. Returning null omits
+// the attribute entirely. Thresholds are each column's approximate two-line
+// capacity at its fixed width.
+const clampedTitle = (text, maxChars) =>
+    text && String(text).length > maxChars ? text : null
+
+const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
 </script>
 
 <template>
@@ -151,7 +172,7 @@ const subGroupLine = (row) =>
         <div class="text-center">
             <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">Monthly Expenditure</h1>
             <p class="text-sm text-tx-subtle mt-1">
-                A fiscal-year ledger of your monthly net expenditure by line.
+                Expenditure by account, month by month across the fiscal year.
             </p>
         </div>
 
@@ -166,14 +187,13 @@ const subGroupLine = (row) =>
         <!-- ════════════════════════════ KPI cards ════════════════════════════════ -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
-            <!-- Total Net Expenditure -->
             <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
                 <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #d97706;"></div>
                 <div class="pl-1">
                     <div class="flex items-start justify-between mb-3">
                         <div>
-                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Net Expenditure</p>
-                            <p class="text-[10px] text-tx-subtle mt-0.5">Net of corrections · all filtered results</p>
+                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total YTD Expenditure</p>
+                            <p class="text-[10px] text-tx-subtle mt-0.5">Net of corrections · all filtered accounts</p>
                         </div>
                         <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(217,119,6,0.1);">
                             <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
@@ -186,13 +206,12 @@ const subGroupLine = (row) =>
                 </div>
             </div>
 
-            <!-- Highest Net Spend Month -->
             <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
                 <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #0ea5e9;"></div>
                 <div class="pl-1">
                     <div class="flex items-start justify-between mb-3">
                         <div>
-                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Highest Net Spend Month</p>
+                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Highest Spend Month</p>
                             <p class="text-[10px] text-tx-subtle mt-0.5">{{ stats.highestMonth?.label || 'No month' }}</p>
                         </div>
                         <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(14,165,233,0.1);">
@@ -206,24 +225,20 @@ const subGroupLine = (row) =>
                 </div>
             </div>
 
-            <!-- Top Net Spend Category -->
             <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
                 <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #6366f1;"></div>
                 <div class="pl-1">
                     <div class="flex items-start justify-between mb-3">
                         <div>
-                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Top Net Spend Category</p>
-                            <p class="text-[10px] text-tx-subtle mt-0.5 truncate max-w-[10rem]" :title="stats.topCategory?.label">
-                                {{ stats.topCategory?.label || 'No category' }}
-                            </p>
+                            <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Accounts Reported</p>
+                            <p class="text-[10px] text-tx-subtle mt-0.5">Lines in FY {{ activeFiscalYear }}</p>
                         </div>
                         <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(99,102,241,0.1);">
-                            <i class="fas fa-layer-group text-sm" style="color: #4f46e5;"></i>
+                            <i class="fas fa-list-ol text-sm" style="color: #4f46e5;"></i>
                         </div>
                     </div>
-                    <p class="font-display text-3xl font-bold leading-none tabular-nums"
-                        :class="isNegative(stats.topCategory?.amount) ? 'text-red-600 dark:text-red-400' : 'text-tx-primary'">
-                        {{ formatCurrency(stats.topCategory?.amount) }}
+                    <p class="font-display text-3xl font-bold leading-none tabular-nums text-tx-primary">
+                        {{ stats.accountCount }}
                     </p>
                 </div>
             </div>
@@ -248,9 +263,20 @@ const subGroupLine = (row) =>
                 </button>
             </div>
 
-            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
-                <div class="lg:col-span-2">
+                <!-- Department leads: this report is departmental, so it is the
+                     filter users reach for first. -->
+                <div>
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Department</label>
+                    <select v-model="filters.department" @change="applyFilters"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Departments</option>
+                        <option v-for="d in departments" :key="d" :value="d">{{ d }}</option>
+                    </select>
+                </div>
+
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Cluster</label>
                     <select v-model="filters.cluster" @change="onClusterChange"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
@@ -259,7 +285,7 @@ const subGroupLine = (row) =>
                     </select>
                 </div>
 
-                <div class="lg:col-span-2">
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Institution</label>
                     <select v-model="filters.institution" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
@@ -270,41 +296,12 @@ const subGroupLine = (row) =>
                     </select>
                 </div>
 
-                <div class="lg:col-span-2">
-                    <label class="block text-xs font-medium text-tx-subtle mb-1">Responsibility</label>
+                <div>
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Responsibility Centre</label>
                     <select v-model="filters.responsibility" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
-                        <option value="">All Responsibilities</option>
+                        <option value="">All Responsibility Centres</option>
                         <option v-for="r in responsibilities" :key="r" :value="r">{{ r }}</option>
-                    </select>
-                </div>
-
-                <div class="lg:col-span-2">
-                    <label class="block text-xs font-medium text-tx-subtle mb-1">Month</label>
-                    <select v-model="filters.period" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
-                        <option value="">All Months</option>
-                        <option v-for="m in months" :key="m.PeriodID" :value="String(m.PeriodID)">{{ m.TRXPeriod }}</option>
-                    </select>
-                </div>
-
-                <div class="lg:col-span-2">
-                    <label class="block text-xs font-medium text-tx-subtle mb-1">Category</label>
-                    <select v-model="filters.group" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
-                        <option value="">All Categories</option>
-                        <option v-for="g in mainGroups" :key="g" :value="g">{{ g }}</option>
-                    </select>
-                </div>
-
-                <div class="lg:col-span-2">
-                    <label class="block text-xs font-medium text-tx-subtle mb-1">Account</label>
-                    <select v-model="filters.account" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
-                        <option value="">All Accounts</option>
-                        <option v-for="acc in accounts" :key="acc.AccountNumber" :value="acc.AccountNumber">
-                            {{ acc.AccountDescription }} ({{ acc.AccountNumber }})
-                        </option>
                     </select>
                 </div>
 
@@ -314,28 +311,83 @@ const subGroupLine = (row) =>
         <!-- ════════════════════════════ Results table ════════════════════════════ -->
         <div class="bg-surface rounded-xl shadow-sm border border-line overflow-hidden relative">
 
-            <!-- Default label is already "Loading expenditure". -->
+            <div class="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-line bg-surface-2">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-tx-subtle">
+                    Monthly net expenditure · TTD
+                </p>
+                <!-- Tells the user which thing the arrow keys are currently
+                     pointed at, since they do double duty on this page. -->
+                <p v-if="canScroll"
+                    :class="[
+                        'flex items-center gap-1.5 text-[11px] transition-colors',
+                        arrowsScrollTable ? 'font-semibold text-amber-700 dark:text-amber-300' : 'text-tx-muted',
+                    ]">
+                    <i class="fas fa-arrows-left-right"></i>
+                    <template v-if="arrowsScrollTable">← → scroll the months</template>
+                    <template v-else>Scroll, or hover and use ← →, for all 12 months</template>
+                </p>
+            </div>
+
             <LedgerLoadingOverlay :show="loading" />
 
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-line">
-                    <thead class="bg-surface-2">
+            <div ref="scroller"
+                class="table-scroll overflow-x-auto"
+                tabindex="0"
+                role="region"
+                aria-label="Monthly expenditure table, scrollable horizontally"
+                @mouseenter="pointerInTable = true"
+                @mouseleave="pointerInTable = false; clearHover()"
+                @focusin="tableFocused = true"
+                @focusout="tableFocused = false">
+                <table class="ledger-table divide-y divide-line" @mouseover="onTableHover">
+                    <!-- Column widths live here, not on the cells. With
+                         table-layout: fixed the browser treats these as
+                         authoritative, which is what keeps the frozen columns'
+                         `left` offsets aligned with where the columns actually
+                         start. Under the default auto layout, widths are merely
+                         hints and the two drift apart. -->
+                    <colgroup>
+                        <col class="w-inst" />
+                        <col class="w-dept" />
+                        <col class="w-acct" />
+                        <col v-for="m in months" :key="m.key" class="w-month" />
+                        <col class="w-ytd" />
+                    </colgroup>
+
+                    <thead>
                         <tr>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Year</th>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Month</th>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Cluster</th>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Institution</th>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Responsibility</th>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Account</th>
-                            <th class="px-4 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Category</th>
-                            <th class="px-4 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">Net Change</th>
+                            <th class="col-inst ledger-frz ledger-wrap px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
+                                Institution
+                            </th>
+                            <th class="col-dept ledger-frz ledger-wrap px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
+                                Department
+                            </th>
+                            <th class="col-acct ledger-frz ledger-edge-l ledger-wrap px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
+                                Account
+                            </th>
+
+                            <th v-for="(m, i) in months" :key="m.key"
+                                :data-month-index="i"
+                                :class="[
+                                    'px-2.5 py-3 text-right text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap',
+                                    m.quarterStart ? 'quarter-edge' : '',
+                                    hoveredMonth === i ? 'is-col-hover text-amber-700 dark:text-amber-300'
+                                        : m.future ? 'text-tx-muted/50' : 'text-tx-subtle',
+                                ]">
+                                {{ m.label }}
+                                <span class="block text-[9px] font-normal tabular-nums opacity-70">'{{ m.year }}</span>
+                            </th>
+
+                            <th class="col-ytd ledger-frz ledger-edge-r px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider whitespace-nowrap">
+                                YTD
+                            </th>
                         </tr>
                     </thead>
+
                     <tbody class="divide-y divide-line">
 
-                        <!-- Empty state -->
                         <tr v-if="rows.data.length === 0">
-                            <td colspan="8" class="px-4 py-16 text-center">
+                            <td :colspan="months.length + 4" class="px-4 py-16 text-center">
                                 <div class="inline-grid place-items-center h-14 w-14 rounded-full bg-surface-3 mb-3">
                                     <i class="fas fa-folder-open text-xl text-tx-muted"></i>
                                 </div>
@@ -349,31 +401,91 @@ const subGroupLine = (row) =>
                             </td>
                         </tr>
 
-                        <!-- Data rows -->
-                        <tr v-for="(row, index) in rows.data" :key="index"
+                        <tr v-for="(row, rowIndex) in rows.data" :key="rowIndex"
                             class="group hover:bg-amber-50/40 dark:hover:bg-amber-900/10 transition-colors">
-                            <td class="px-4 py-3 text-sm text-tx-primary whitespace-nowrap font-semibold tabular-nums">{{ row.FinancialYear ?? '—' }}</td>
-                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap tabular-nums">{{ row.TRXPeriod ?? '—' }}</td>
-                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.ClusterName ?? '—' }}</td>
-                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.InstitutionName ?? '—' }}</td>
-                            <td class="px-4 py-3 text-sm text-tx-body whitespace-nowrap">{{ row.Responsibility ?? '—' }}</td>
-                            <td class="px-4 py-3 text-sm max-w-xs">
-                                <div class="text-tx-body truncate" :title="row.AccountDescription">{{ row.AccountDescription ?? '—' }}</div>
-                                <div class="text-[11px] text-tx-subtle font-mono">{{ row.AccountNumber ?? '—' }}</div>
+
+                            <td class="col-inst ledger-frz ledger-wrap px-3 py-3 text-sm text-tx-body align-top">
+                                <span class="line-clamp-2" :title="clampedTitle(row.InstitutionName, IDENTITY_CLAMP.institution)">
+                                    {{ row.InstitutionName ?? '—' }}
+                                </span>
                             </td>
-                            <td class="px-4 py-3 text-sm max-w-xs">
-                                <div class="text-tx-body truncate" :title="row.LineDescription">{{ row.MainGroup ?? '—' }}</div>
-                                <div v-if="subGroupLine(row)" class="text-[11px] text-tx-subtle truncate" :title="subGroupLine(row)">
-                                    {{ subGroupLine(row) }}
+                            <td class="col-dept ledger-frz ledger-wrap px-3 py-3 text-sm text-tx-body align-top">
+                                <span class="line-clamp-2" :title="clampedTitle(row.DepartmentName, IDENTITY_CLAMP.department)">
+                                    {{ row.DepartmentName ?? '—' }}
+                                </span>
+                            </td>
+                            <td class="col-acct ledger-frz ledger-edge-l ledger-wrap px-3 py-3 text-sm align-top">
+                                <div class="text-tx-body line-clamp-2" :title="clampedTitle(row.AccountDescription, IDENTITY_CLAMP.account)">
+                                    {{ row.AccountDescription ?? '—' }}
+                                </div>
+                                <!-- Fixed-format 27-char identifier, held to one line:
+                                     wrapping it added a whole line to every row. -->
+                                <div class="acct-no text-[10px] text-tx-subtle font-mono mt-1" :title="row.AccountNumber">
+                                    {{ row.AccountNumber ?? '—' }}
                                 </div>
                             </td>
-                            <td class="px-4 py-3 text-sm text-right whitespace-nowrap font-semibold tabular-nums"
-                                :class="isNegative(row.NetChange) ? 'text-red-600 dark:text-red-400' : 'text-tx-primary'">
-                                <span class="border-b border-transparent group-hover:border-amber-400/60 transition-colors">{{ formatCurrency(row.NetChange) }}</span>
+
+                            <td v-for="(m, i) in months" :key="m.key"
+                                :data-month-index="i"
+                                :style="heatStyle(row, m.key, rowIndex)"
+                                :class="[
+                                    'px-2.5 py-3 text-[13px] text-right whitespace-nowrap tabular-nums align-top',
+                                    m.quarterStart ? 'quarter-edge' : '',
+                                    hoveredMonth === i ? 'is-col-hover' : '',
+                                    isZero(row[m.key])   ? 'text-tx-muted/40'
+                                        : isNegative(row[m.key]) ? 'text-red-600 dark:text-red-400'
+                                        : 'text-tx-body',
+                                ]">
+                                <template v-if="isZero(row[m.key])">–</template>
+                                <template v-else>{{ formatAmount(row[m.key]) }}</template>
+                            </td>
+
+                            <td :class="[
+                                    'col-ytd ledger-frz ledger-edge-r px-3 py-3 text-sm text-right whitespace-nowrap font-semibold tabular-nums align-top',
+                                    isNegative(row.YTDTotal) ? 'text-red-600 dark:text-red-400' : 'text-tx-primary',
+                                ]">
+                                <span class="border-b border-transparent group-hover:border-amber-400/60 transition-colors">
+                                    {{ formatAmount(row.YTDTotal) }}
+                                </span>
                             </td>
                         </tr>
 
                     </tbody>
+
+                    <!-- Totals across the ENTIRE filtered set, not this page. Said
+                         explicitly in the label, because a totals row sitting under
+                         25 visible rows otherwise reads as the sum of those rows. -->
+                    <tfoot v-if="rows.data.length">
+                        <tr>
+                            <td colspan="3" class="col-foot-label ledger-frz ledger-edge-l px-3 py-3 text-left align-middle">
+                                <span class="text-[11px] font-semibold uppercase tracking-wider text-tx-subtle">Totals</span>
+                                <span class="ml-2 text-[11px] text-tx-muted">
+                                    all {{ stats.accountCount }} account{{ stats.accountCount === 1 ? '' : 's' }}
+                                </span>
+                            </td>
+
+                            <td v-for="(m, i) in months" :key="m.key"
+                                :data-month-index="i"
+                                :class="[
+                                    'px-2.5 py-3 text-[13px] text-right whitespace-nowrap tabular-nums font-semibold',
+                                    m.quarterStart ? 'quarter-edge' : '',
+                                    hoveredMonth === i ? 'is-col-hover' : '',
+                                    isZero(totals.months[m.key]) ? 'text-tx-muted/40'
+                                        : isNegative(totals.months[m.key]) ? 'text-red-600 dark:text-red-400'
+                                        : 'text-tx-primary',
+                                ]">
+                                <template v-if="isZero(totals.months[m.key])">–</template>
+                                <template v-else>{{ formatAmount(totals.months[m.key]) }}</template>
+                            </td>
+
+                            <td :class="[
+                                    'col-ytd ledger-frz ledger-edge-r px-3 py-3 text-sm text-right whitespace-nowrap font-bold tabular-nums',
+                                    isNegative(totals.ytd) ? 'text-red-600 dark:text-red-400' : 'text-tx-primary',
+                                ]">
+                                {{ formatAmount(totals.ytd) }}
+                            </td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
 
@@ -392,8 +504,7 @@ const subGroupLine = (row) =>
                                     link.active ? 'bg-gradient-to-b from-amber-400 to-amber-500 text-[#1a1205] font-semibold shadow-sm' : 'text-tx-body hover:bg-surface-3']">
                                 <span v-html="link.label"></span>
                             </Link>
-                            <span v-else
-                                class="px-3 py-1.5 text-sm rounded-md opacity-40 text-tx-body">
+                            <span v-else class="px-3 py-1.5 text-sm rounded-md opacity-40 text-tx-body">
                                 <span v-html="link.label"></span>
                             </span>
                         </template>
@@ -406,3 +517,57 @@ const subGroupLine = (row) =>
     </div>
 </template>
 
+<style scoped>
+/* ── Column widths and frozen offsets ────────────────────────────────────────
+   Only this page's column layout lives here; the table mechanics are shared in
+   app.css. Each column's `left` is the running sum of the widths before it, so
+   widths and offsets are declared together at every breakpoint — splitting them
+   apart is what lets them drift and open gaps between frozen columns.
+
+   Breakpoints are chosen against CONTENT width, not viewport: the layout has a
+   fixed 18rem sidebar from md up, so a 1024px viewport is really ~700px of
+   table. Freezing starts at lg (see app.css) with deliberately tight columns. */
+
+.w-inst  { width: 8rem; }
+.w-dept  { width: 8rem; }
+.w-acct  { width: 11rem; }
+.w-month { width: 5.75rem; }
+.w-ytd   { width: 7rem; }
+
+@media (min-width: 1024px) {
+    .col-inst { left: 0; }
+    .col-dept { left: 8rem; }
+    .col-acct { left: 16rem; }
+
+    /* Spans the three identity columns, so it freezes as one cell at left: 0. */
+    .col-foot-label { left: 0; }
+}
+
+@media (min-width: 1280px) {
+    .w-inst  { width: 9.5rem; }
+    .w-dept  { width: 9.5rem; }
+    .w-acct  { width: 12rem; }
+    .w-month { width: 6rem; }
+
+    .col-dept { left: 9.5rem; }
+    .col-acct { left: 19rem; }
+}
+
+@media (min-width: 1536px) {
+    .w-inst  { width: 11rem; }
+    .w-dept  { width: 11rem; }
+    .w-acct  { width: 13rem; }
+
+    .col-dept { left: 11rem; }
+    .col-acct { left: 22rem; }
+}
+
+/* Large desktops: only the month columns grow. Widening them costs nothing
+   structurally, whereas changing identity widths means re-deriving the offsets. */
+@media (min-width: 1920px) {
+    .w-month { width: 7rem; }
+}
+
+/* The YTD column stays visually separated from the months at every size. */
+.col-ytd { border-left: 2px solid rgba(251, 191, 36, 0.4); }
+</style>

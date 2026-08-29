@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Http\Controllers\AllocationLineExpenditureController;
+use App\Http\Controllers\VarianceController;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia;
@@ -10,7 +10,7 @@ use Tests\Feature\Concerns\UsesLedgerData;
 use Tests\TestCase;
 
 /**
- * Allocation Line Expenditure reads dbo.vw_FinanceLedger, so these tests need a
+ * The Variance page reads dbo.vw_FinanceLedger, so these tests need a
  * reachable SQL Server holding a populated snapshot; they skip when they cannot
  * get one (see UsesLedgerData). EnsureUserIsActive is excluded because that
  * middleware reaches the separate auth SQL Server.
@@ -28,7 +28,7 @@ use Tests\TestCase;
  * neither. These assertions verify the SQL view's own output — the PHP-side
  * arithmetic has its own offline suite in tests/Unit/DerivesAllocationLinesTest.
  */
-class AllocationLineExpenditureTest extends TestCase
+class VarianceTest extends TestCase
 {
     use RefreshDatabase;
     use UsesLedgerData;
@@ -37,7 +37,7 @@ class AllocationLineExpenditureTest extends TestCase
     {
         return $this->actingAs($this->ledgerUser())
             ->withoutMiddleware(EnsureUserIsActive::class)
-            ->get('/allocation-line-expenditure'.($query ? '?'.http_build_query($query) : ''));
+            ->get('/variance'.($query ? '?'.http_build_query($query) : ''));
     }
 
     /** @return array<int,array<string,mixed>> every row across every page */
@@ -61,7 +61,7 @@ class AllocationLineExpenditureTest extends TestCase
         $this->visit()
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->component('Expenditure/Allocation Line Expenditure')
+                ->component('Expenditure/Variance')
                 ->has('rows.data')
                 ->has('clusters')
                 ->has('institutions')
@@ -86,7 +86,7 @@ class AllocationLineExpenditureTest extends TestCase
 
     public function test_it_requires_authentication(): void
     {
-        $this->get('/allocation-line-expenditure')->assertRedirect('/login');
+        $this->get('/variance')->assertRedirect('/login');
     }
 
     public function test_the_page_is_not_empty_for_a_user_with_ledger_rows(): void
@@ -102,7 +102,7 @@ class AllocationLineExpenditureTest extends TestCase
     {
         foreach ($this->allRows() as $row) {
             $sum = 0.0;
-            foreach (AllocationLineExpenditureController::MONTHS as $month) {
+            foreach (VarianceController::MONTHS as $month) {
                 $this->assertArrayHasKey($month, $row, "Row is missing month {$month}.");
                 $sum += (float) $row[$month];
             }
