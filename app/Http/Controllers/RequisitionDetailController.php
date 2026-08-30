@@ -3,11 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\DerivesRequisitionDetail;
+use App\Concerns\ExportsReports;
 use App\Concerns\ResolvesFiscalYear;
 use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsRequisitionCache;
 use App\Models\FinanceLedger;
 use App\Models\FinanceRequisition;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -17,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Shared body of the two requisition detail pages (Phase 3).
@@ -36,6 +39,7 @@ use Inertia\Response;
 abstract class RequisitionDetailController extends Controller
 {
     use DerivesRequisitionDetail;
+    use ExportsReports;
     use ResolvesFiscalYear;
     use ResolvesLedgerAccess;
     use VersionsRequisitionCache;
@@ -67,24 +71,205 @@ abstract class RequisitionDetailController extends Controller
 
     public function index(Request $request): Response
     {
-        $username = $request->user()->username;
+        // Held outside the try so the outage path can still echo back what the
+        // user asked for.
         $filters = $request->only('cluster', 'institution', 'department', 'account', 'vendor', 'status', 'fy');
         $currentFiscalYear = $this->currentFiscalYear();
 
         try {
-            $yearData = $this->availableYears($username);
-            $years = collect($yearData['years']);
-
-            $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
-            $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
-            $filters['fy'] = $activeFiscalYear;
-
-            $hasAccess = $this->userHasLedgerAccess($username);
-            $rows = $this->detailRows($username, (string) $activeFiscalYear);
-            $snapshot = $this->snapshotFreshness();
+            $r = $this->resolve($request);
         } catch (\Throwable $e) {
             return $this->unavailable($request, $filters, $currentFiscalYear, $e);
         }
+
+        return Inertia::render($this->component(), [
+            'rows' => $this->paginate($request, $r['rows']),
+            'clusters' => $r['clusters'],
+            'institutions' => $r['institutions'],
+            'departments' => $r['departments'],
+            'accounts' => $r['accounts'],
+            'vendors' => $r['vendors'],
+            'statuses' => $r['statuses'],
+            'years' => $r['years'],
+            // Totals over the whole filtered set, before pagination.
+            'totals' => $this->requisitionTotals($r['rows']),
+            'filters' => $r['filters'],
+            'activeFiscalYear' => $r['activeFiscalYear'],
+            'currentFiscalYear' => $currentFiscalYear,
+            'fyNav' => $r['fyNav'],
+            'hasAccess' => $r['hasAccess'],
+            'snapshot' => $r['snapshot'],
+            // Fiscal years the detail holds but the ledger does not, so the page
+            // can say why they are absent rather than appearing to lose data.
+            'unsummarisedYears' => $r['unsummarisedYears'],
+        ]);
+    }
+
+    // =========================================================================
+    // Export
+    // =========================================================================
+
+    /**
+     * Defined once here, so both subclasses get their CSV with no edit — the
+     * same reason this base exists at all. statuses() already keeps AP/PO and
+     * RT/HD/PN from leaking into each other's file, and routeName() supplies
+     * both the redirect target and the filename slug.
+     */
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        try {
+            $r = $this->resolve($request);
+        } catch (\Throwable $e) {
+            Log::error('Requisition detail export failed.', [
+                'page' => $this->routeName(),
+                'username' => $request->user()->username,
+                'fy' => $request->input('fy'),
+                'exception' => $e->getMessage(),
+            ]);
+
+            return $this->exportRedirect($request, $this->routeName(), self::EXPORT_UNAVAILABLE);
+        }
+
+        if (! $r['hasAccess']) {
+            return $this->exportRedirect($request, $this->routeName(), self::EXPORT_NO_ACCESS);
+        }
+
+        if ($r['droppedFilters'] !== []) {
+            return $this->exportRedirect($request, $this->routeName(), self::EXPORT_STALE_FILTER);
+        }
+
+        if ($r['rows']->isEmpty()) {
+            return $this->exportRedirect($request, $this->routeName(), self::EXPORT_NO_ROWS);
+        }
+
+        Log::info('CSV export started.', [
+            'page' => $this->routeName(),
+            'username' => $request->user()->username,
+            'fy' => $r['activeFiscalYear'],
+            'filters' => array_filter($r['filters']),
+            // The snapshot the file was cut from. Dropped as a COLUMN (it
+            // repeated on every row for no analytical value) but kept here, so
+            // the provenance of any exported file is still recoverable.
+            'snapshot' => $r['snapshot']['refreshedAt'],
+            'rows' => $r['rows']->count(),
+        ]);
+
+        return $this->streamCsv(
+            $this->csvFilename($this->exportSlug(), $r['activeFiscalYear']),
+            self::EXPORT_HEADINGS,
+            fn () => $this->exportRows($r['rows']),
+            ['page' => $this->routeName(), 'username' => $request->user()->username],
+        );
+    }
+
+    /**
+     * The 25 fetched columns — see export.md 5.4.
+     *
+     * ONE SCHEMA FOR BOTH PAGES, so the two files can be safely unioned.
+     * PO Number is usually empty on routing rows; the column stays regardless.
+     *
+     * The eight columns the screen does not show are here on purpose: Order
+     * Quantity and Quantity Shipped are what make the netted Extended Cost
+     * independently auditable, and the table only exposes them in a tooltip.
+     *
+     * PartiallyReceived is deliberately absent — it is a derived UI flag for
+     * muting a row, not data. So is the snapshot timestamp: it was the same
+     * value on all 3,408 rows, which is padding rather than information. Both
+     * pages still show the snapshot age on screen (SnapshotFreshness.vue), and
+     * the export log records it per download.
+     */
+    private const EXPORT_HEADINGS = [
+        'Financial Year', 'Requisition Number', 'PO Number', 'Line Number',
+        'Status Code', 'Status Name', 'Date Created', 'Requisition Owner',
+        'Vendor ID', 'Vendor Name', 'Item ID', 'Item Description', 'UofM',
+        'Site Location', 'Cluster', 'Institution', 'Responsibility Centre', 'Department',
+        'Account Number', 'Account Description',
+        'Order Quantity', 'Quantity Shipped', 'Remaining Quantity', 'Unit Cost', 'Extended Cost',
+    ];
+
+    /**
+     * Nothing here is re-derived. Remaining Quantity is the row's Quantity (the
+     * view aliases ActBalance to it — the unshipped balance, floored at zero),
+     * and Extended Cost is already net of receipts. Recomputing either in PHP
+     * is what would break Phase 2's reconciliation guarantee silently.
+     *
+     * @param  Collection<int,array<string,mixed>>  $rows
+     * @return \Generator<int,array<int,string>>
+     */
+    private function exportRows(Collection $rows): \Generator
+    {
+        foreach ($rows as $row) {
+            yield [
+                $this->csvText($row['FinancialYear']),
+                $this->csvText($row['RequisitionNumber']),
+                $this->csvText($row['PONumber']),
+                $this->csvText($row['LineNbr']),
+                $this->csvText($row['Status']),
+                $this->csvText($row['StatusName']),
+                $this->csvDate($row['ReqDateCreated']),
+                $this->csvText($row['Name']),
+                $this->csvText($row['VendorID']),
+                $this->csvText($row['VendorName']),
+                $this->csvText($row['ItemID']),
+                $this->csvText($row['ItemDescription']),
+                $this->csvText($row['UofM']),
+                $this->csvText($row['SiteLocation']),
+                $this->csvText($row['Cluster']),
+                $this->csvText($row['Institution']),
+                $this->csvText($row['ResponsibilityCentre']),
+                $this->csvText($row['Department']),
+                $this->csvText($row['AccountNumber']),
+                $this->csvText($row['AccountDescription']),
+                $this->csvQuantity($row['OrderQuantity']),
+                $this->csvQuantity($row['QtyShipped']),
+                $this->csvQuantity($row['Quantity']),
+                $this->csvMoney($row['UnitCost']),
+                $this->csvMoney($row['ExtendedCost']),
+            ];
+        }
+    }
+
+    /** Filename slug — "encumbered-details" from "encumbered-details.index". */
+    private function exportSlug(): string
+    {
+        return (string) preg_replace('/\.index$/', '', $this->routeName());
+    }
+
+    // =========================================================================
+    // Shared resolution
+    // =========================================================================
+
+    /**
+     * Everything index() and export() both need — a pure lift of what used to
+     * be inline in index(), extracted so the screen and the CSV cannot drift.
+     *
+     * Throws on any SQL failure; the caller decides whether that renders an
+     * empty page or redirects.
+     *
+     * @return array{rows:Collection<int,array<string,mixed>>, filters:array<string,mixed>,
+     *               droppedFilters:array<int,string>, activeFiscalYear:?int,
+     *               years:array<int,string>, unsummarisedYears:array<int,string>,
+     *               fyNav:array{prev:?int,next:?int}, hasAccess:bool,
+     *               snapshot:array{refreshedAt:string|null,age:string|null},
+     *               clusters:array, institutions:array, departments:array,
+     *               accounts:array, vendors:array, statuses:array}
+     */
+    private function resolve(Request $request): array
+    {
+        $username = $request->user()->username;
+        $filters = $request->only('cluster', 'institution', 'department', 'account', 'vendor', 'status', 'fy');
+        $currentFiscalYear = $this->currentFiscalYear();
+
+        $yearData = $this->availableYears($username);
+        $years = collect($yearData['years']);
+
+        $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
+        $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
+        $filters['fy'] = $activeFiscalYear;
+
+        $hasAccess = $this->userHasLedgerAccess($username);
+        $rows = $this->detailRows($username, (string) $activeFiscalYear);
+        $snapshot = $this->snapshotFreshness();
 
         // ── Filter option lists (scoped to what the active FY contains) ──────────
         $clusters = $rows->pluck('Cluster')->filter()->unique()->sort()->values()->all();
@@ -120,62 +305,59 @@ abstract class RequisitionDetailController extends Controller
 
         // ── Apply filters ────────────────────────────────────────────────────────
         // Only honour a selection that is a valid option in the active FY, so a
-        // stale filter carried across an FY switch never silently empties the table.
+        // stale filter carried across an FY switch never silently empties the
+        // table. A non-empty invalid value lands in $dropped: index() ignores
+        // it, export() refuses on it.
         $filtered = $rows;
+        $dropped = [];
 
-        $filters['cluster'] = ($v = $request->input('cluster')) && in_array($v, $clusters, true) ? $v : null;
+        $filters['cluster'] = $this->validFilter($request, 'cluster', $clusters, $dropped);
         if ($filters['cluster']) {
             $filtered = $filtered->where('Cluster', $filters['cluster']);
         }
 
-        $filters['institution'] = ($v = $request->input('institution')) && in_array($v, array_column($institutions, 'Institution'), true) ? $v : null;
+        $filters['institution'] = $this->validFilter($request, 'institution', array_column($institutions, 'Institution'), $dropped);
         if ($filters['institution']) {
             $filtered = $filtered->where('Institution', $filters['institution']);
         }
 
-        $filters['department'] = ($v = $request->input('department')) && in_array($v, $departments, true) ? $v : null;
+        $filters['department'] = $this->validFilter($request, 'department', $departments, $dropped);
         if ($filters['department']) {
             $filtered = $filtered->where('Department', $filters['department']);
         }
 
-        $filters['account'] = ($v = $request->input('account')) && in_array($v, array_column($accounts, 'AccountNumber'), true) ? $v : null;
+        $filters['account'] = $this->validFilter($request, 'account', array_column($accounts, 'AccountNumber'), $dropped);
         if ($filters['account']) {
             $filtered = $filtered->where('AccountNumber', $filters['account']);
         }
 
-        $filters['vendor'] = ($v = $request->input('vendor')) && in_array($v, $vendors, true) ? $v : null;
+        $filters['vendor'] = $this->validFilter($request, 'vendor', $vendors, $dropped);
         if ($filters['vendor']) {
             $filtered = $filtered->where('VendorName', $filters['vendor']);
         }
 
-        $filters['status'] = ($v = $request->input('status')) && in_array($v, array_column($statuses, 'Status'), true) ? $v : null;
+        $filters['status'] = $this->validFilter($request, 'status', array_column($statuses, 'Status'), $dropped);
         if ($filters['status']) {
             $filtered = $filtered->where('Status', $filters['status']);
         }
 
-        $filtered = $filtered->values();
-
-        return Inertia::render($this->component(), [
-            'rows' => $this->paginate($request, $filtered),
+        return [
+            'rows' => $filtered->values(),
+            'filters' => $filters,
+            'droppedFilters' => $dropped,
+            'activeFiscalYear' => $activeFiscalYear,
+            'years' => $years->all(),
+            'unsummarisedYears' => $yearData['unsummarised'],
+            'fyNav' => $fyNav,
+            'hasAccess' => $hasAccess,
+            'snapshot' => $snapshot,
             'clusters' => $clusters,
             'institutions' => $institutions,
             'departments' => $departments,
             'accounts' => $accounts,
             'vendors' => $vendors,
             'statuses' => $statuses,
-            'years' => $years->all(),
-            // Totals over the whole filtered set, before pagination.
-            'totals' => $this->requisitionTotals($filtered),
-            'filters' => $filters,
-            'activeFiscalYear' => $activeFiscalYear,
-            'currentFiscalYear' => $currentFiscalYear,
-            'fyNav' => $fyNav,
-            'hasAccess' => $hasAccess,
-            'snapshot' => $snapshot,
-            // Fiscal years the detail holds but the ledger does not, so the page
-            // can say why they are absent rather than appearing to lose data.
-            'unsummarisedYears' => $yearData['unsummarised'],
-        ]);
+        ];
     }
 
     // =========================================================================

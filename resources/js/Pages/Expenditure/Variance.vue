@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 import FiscalYearHero from '@/Components/FiscalYearHero.vue'
+import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 import { useLedgerTable } from '@/composables/useLedgerTable'
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
@@ -37,11 +38,23 @@ const filters = ref({
 })
 
 // ── Navigation helpers ──────────────────────────────────────────────────────────
+// The filters the screen has applied. Shared by the Inertia visit and the
+// export link so a CSV can never describe a different set of rows than the
+// table above it. `page` is absent because it was never a filter.
+const queryParams = computed(() => Object.fromEntries(
+    Object.entries(filters.value).filter(([, v]) => v !== '' && v !== null)
+))
+
+// Guarded like SideBar.vue does: a missing Ziggy degrades to a disabled
+// button rather than blanking the page.
+const exportUrl = computed(() =>
+    typeof route === 'function' ? route('variance.export', queryParams.value) : null
+)
+
+const exportRowCount = computed(() => props.stats?.accountCount ?? 0)
+
 const applyFilters = () => {
-    const params = Object.fromEntries(
-        Object.entries(filters.value).filter(([, v]) => v !== '' && v !== null)
-    )
-    router.get(route('variance.index'), params, {
+    router.get(route('variance.index'), queryParams.value, {
         preserveState:  true,
         preserveScroll: true,
         replace:        true,
@@ -324,11 +337,19 @@ const statusTitle = (row) => {
                         {{ activeFilterCount }}
                     </span>
                 </div>
+                <div class="flex items-center gap-3">
+                <ExportCsvButton
+                    :href="exportUrl"
+                    :row-count="exportRowCount"
+                    :busy="loading"
+                    :has-access="hasAccess"
+                />
                 <button v-if="activeFilterCount" @click="clearFilters"
                     class="inline-flex items-center gap-1.5 text-xs font-medium text-tx-subtle hover:text-red-500 transition">
                     <i class="fas fa-xmark"></i>
                     Clear all
                 </button>
+                </div>
             </div>
 
             <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">

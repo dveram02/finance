@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Concerns\DerivesAllocationLines;
+use App\Concerns\ExportsReports;
 use App\Concerns\ResolvesFiscalYear;
 use App\Concerns\ResolvesLedgerAccess;
 use App\Concerns\VersionsLedgerCache;
 use App\Models\FinanceLedger;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -14,6 +16,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Variance — allocation against actual spend, per account line, for a fiscal
@@ -39,6 +42,7 @@ use Inertia\Response;
 class VarianceController extends Controller
 {
     use DerivesAllocationLines;
+    use ExportsReports;
     use ResolvesFiscalYear;
     use ResolvesLedgerAccess;
     use VersionsLedgerCache;
@@ -48,24 +52,207 @@ class VarianceController extends Controller
 
     private const PER_PAGE = 25;
 
+    /** On-screen wording for the server-computed StatusKey. */
+    private const STATUS_LABELS = [
+        'over' => 'Exceeded',
+        'under' => 'Under budget',
+        'exact' => 'Fully spent',
+    ];
+
     public function index(Request $request): Response
+    {
+        $filters = $request->only('cluster', 'institution', 'department', 'description', 'account', 'fy');
+        $currentFiscalYear = $this->currentFiscalYear();
+
+        try {
+            $r = $this->resolve($request);
+        } catch (\Throwable $e) {
+            return $this->unavailable($request, $filters, $currentFiscalYear, $e);
+        }
+
+        $filtered = $r['rows'];
+
+        // ── Totals over the whole filtered set, before pagination ────────────────
+        // A totals row that only summed the visible page would look authoritative
+        // and be wrong.
+        $totals = $this->allocationTotals($filtered, self::MONTHS);
+
+        $stats = [
+            'totalAllocation' => $totals['allocation'],
+            'totalExpenditure' => $totals['ytd'],
+            'balance' => $totals['balance'],
+            'exceededCount' => $totals['exceededCount'],
+            'accountCount' => $filtered->count(),
+        ];
+
+        return Inertia::render('Expenditure/Variance', [
+            'rows' => $this->paginate($request, $filtered),
+            'clusters' => $r['clusters'],
+            'institutions' => $r['institutions'],
+            'departments' => $r['departments'],
+            'descriptions' => $r['descriptions'],
+            'accounts' => $r['accounts'],
+            'years' => $r['years'],
+            // The same cutoff the CSV blanks against, so the screen and the
+            // file cannot disagree about which months have posted.
+            'months' => $this->monthHeadings((int) $r['activeFiscalYear'], $r['monthCutoff']),
+            'stats' => $stats,
+            'totals' => $totals,
+            'filters' => $r['filters'],
+            'activeFiscalYear' => $r['activeFiscalYear'],
+            'currentFiscalYear' => $currentFiscalYear,
+            'fyNav' => $r['fyNav'],
+            'hasAccess' => $r['hasAccess'],
+        ]);
+    }
+
+    // =========================================================================
+    // Export
+    // =========================================================================
+
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        try {
+            $r = $this->resolve($request);
+        } catch (\Throwable $e) {
+            Log::error('Variance export failed.', [
+                'username' => $request->user()->username,
+                'fy' => $request->input('fy'),
+                'exception' => $e->getMessage(),
+            ]);
+
+            return $this->exportRedirect($request, 'variance.index', self::EXPORT_UNAVAILABLE);
+        }
+
+        if (! $r['hasAccess']) {
+            return $this->exportRedirect($request, 'variance.index', self::EXPORT_NO_ACCESS);
+        }
+
+        if ($r['droppedFilters'] !== []) {
+            return $this->exportRedirect($request, 'variance.index', self::EXPORT_STALE_FILTER);
+        }
+
+        if ($r['rows']->isEmpty()) {
+            return $this->exportRedirect($request, 'variance.index', self::EXPORT_NO_ROWS);
+        }
+
+        $fy = (int) $r['activeFiscalYear'];
+
+        Log::info('CSV export started.', [
+            'page' => 'variance',
+            'username' => $request->user()->username,
+            'fy' => $fy,
+            'filters' => array_filter($r['filters']),
+            'rows' => $r['rows']->count(),
+        ]);
+
+        return $this->streamCsv(
+            $this->csvFilename('variance', $fy),
+            $this->exportHeadings($fy),
+            fn () => $this->exportRows($r['rows'], $r['monthCutoff']),
+            ['page' => 'variance', 'username' => $request->user()->username],
+        );
+    }
+
+    /**
+     * 28 columns. This order is an API contract — see export.md section 5.3.
+     *
+     * Responsibility is included even though the screen omits it: it is what
+     * distinguishes two rows sharing an account number across access
+     * dimensions, and without it the file shows apparent duplicates.
+     *
+     * @return array<int,string>
+     */
+    private function exportHeadings(int $fiscalYear): array
+    {
+        return array_merge(
+            ['Financial Year', 'Cluster', 'Institution', 'Responsibility', 'Department',
+                'Account Number', 'Account Description', 'Allocation'],
+            $this->fiscalMonthHeadings($fiscalYear),
+            ['YTD Expenditure', 'Approved', 'Routing', 'Actual Expenditure',
+                'Excess', 'Allocation Balance', 'Budget Status', 'Budget Status Amount'],
+        );
+    }
+
+    /**
+     * Every value here already exists on the row DerivesAllocationLines
+     * produced. Nothing is re-derived — the money rule lives in SQL and in that
+     * trait, and restating it here is exactly how a CSV starts disagreeing with
+     * the screen it came from.
+     *
+     * @param  Collection<int,array<string,mixed>>  $rows
+     * @return \Generator<int,array<int,string>>
+     */
+    private function exportRows(Collection $rows, int $cutoff): \Generator
+    {
+        foreach ($rows as $row) {
+            $months = [];
+            foreach (self::MONTHS as $i => $month) {
+                // A month that has not happened is not a month with no spend.
+                $months[] = ($i + 1) > $cutoff ? '' : $this->csvMoney($row[$month]);
+            }
+
+            yield array_merge(
+                [
+                    $this->csvText($row['FinancialYear']),
+                    $this->csvText($row['ClusterName']),
+                    $this->csvText($row['InstitutionName']),
+                    $this->csvText($row['Responsibility']),
+                    $this->csvText($row['DepartmentName']),
+                    $this->csvText($row['AccountNumber']),
+                    $this->csvText($row['AccountDescription']),
+                    $this->csvMoney($row['Allocation']),
+                ],
+                $months,
+                [
+                    $this->csvMoney($row['YTDTotal']),
+                    $this->csvMoney($row['Approved']),
+                    $this->csvMoney($row['Routing']),
+                    $this->csvMoney($row['ActualExpenditure']),
+                    $this->csvMoney($row['Excess']),
+                    $this->csvMoney($row['AllocationBalance']),
+                    $this->csvText(self::STATUS_LABELS[$row['StatusKey']] ?? $row['StatusKey']),
+                    $this->csvMoney($row['StatusAmount']),
+                ],
+            );
+        }
+    }
+
+    // =========================================================================
+    // Shared resolution
+    // =========================================================================
+
+    /**
+     * Everything index() and export() both need — a pure lift of what used to
+     * be inline in index(), extracted so the screen and the CSV cannot drift.
+     *
+     * Throws on any SQL failure; the caller decides whether that renders an
+     * empty page or redirects.
+     *
+     * @return array{rows:Collection<int,array<string,mixed>>, filters:array<string,mixed>,
+     *               droppedFilters:array<int,string>, activeFiscalYear:?int,
+     *               years:array<int,string>, fyNav:array{prev:?int,next:?int}, hasAccess:bool,
+     *               clusters:array, institutions:array, departments:array,
+     *               descriptions:array, accounts:array}
+     */
+    private function resolve(Request $request): array
     {
         $username = $request->user()->username;
         $filters = $request->only('cluster', 'institution', 'department', 'description', 'account', 'fy');
         $currentFiscalYear = $this->currentFiscalYear();
 
-        try {
-            $years = collect($this->availableYears($username));
+        $years = collect($this->availableYears($username));
 
-            $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
-            $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
-            $filters['fy'] = $activeFiscalYear;
+        $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
+        $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
+        $filters['fy'] = $activeFiscalYear;
 
-            $hasAccess = $this->userHasLedgerAccess($username);
-            $rows = $this->ledgerRows($username, (string) $activeFiscalYear);
-        } catch (\Throwable $e) {
-            return $this->unavailable($request, $filters, $currentFiscalYear, $e);
-        }
+        $hasAccess = $this->userHasLedgerAccess($username);
+        $rows = $this->ledgerRows($username, (string) $activeFiscalYear);
+
+        // Derived from the UNFILTERED year, so the month boundary is a property
+        // of the posting calendar rather than of the current filter selection.
+        $monthCutoff = $this->postedCutoff((int) $activeFiscalYear, $rows, self::MONTHS);
 
         // ── Filter option lists (scoped to what the active FY contains) ──────────
         $clusters = $rows->pluck('ClusterName')->filter()->unique()->sort()->values()->all();
@@ -91,66 +278,52 @@ class VarianceController extends Controller
 
         // ── Apply filters ────────────────────────────────────────────────────────
         // Only honour a selection that is a valid option in the active FY, so a
-        // stale filter carried across an FY switch never silently empties the table.
+        // stale filter carried across an FY switch never silently empties the
+        // table. A non-empty invalid value lands in $dropped: index() ignores
+        // it, export() refuses on it.
         $filtered = $rows;
+        $dropped = [];
 
-        $filters['cluster'] = ($v = $request->input('cluster')) && in_array($v, $clusters, true) ? $v : null;
+        $filters['cluster'] = $this->validFilter($request, 'cluster', $clusters, $dropped);
         if ($filters['cluster']) {
             $filtered = $filtered->where('ClusterName', $filters['cluster']);
         }
 
-        $filters['institution'] = ($v = $request->input('institution')) && in_array($v, array_column($institutions, 'InstitutionName'), true) ? $v : null;
+        $filters['institution'] = $this->validFilter($request, 'institution', array_column($institutions, 'InstitutionName'), $dropped);
         if ($filters['institution']) {
             $filtered = $filtered->where('InstitutionName', $filters['institution']);
         }
 
-        $filters['department'] = ($v = $request->input('department')) && in_array($v, $departments, true) ? $v : null;
+        $filters['department'] = $this->validFilter($request, 'department', $departments, $dropped);
         if ($filters['department']) {
             $filtered = $filtered->where('DepartmentName', $filters['department']);
         }
 
-        $filters['description'] = ($v = $request->input('description')) && in_array($v, $descriptions, true) ? $v : null;
+        $filters['description'] = $this->validFilter($request, 'description', $descriptions, $dropped);
         if ($filters['description']) {
             $filtered = $filtered->where('AccountDescription', $filters['description']);
         }
 
-        $filters['account'] = ($v = $request->input('account')) && in_array($v, array_column($accounts, 'AccountNumber'), true) ? $v : null;
+        $filters['account'] = $this->validFilter($request, 'account', array_column($accounts, 'AccountNumber'), $dropped);
         if ($filters['account']) {
             $filtered = $filtered->where('AccountNumber', $filters['account']);
         }
 
-        $filtered = $filtered->values();
-
-        // ── Totals over the whole filtered set, before pagination ────────────────
-        // A totals row that only summed the visible page would look authoritative
-        // and be wrong.
-        $totals = $this->allocationTotals($filtered, self::MONTHS);
-
-        $stats = [
-            'totalAllocation' => $totals['allocation'],
-            'totalExpenditure' => $totals['ytd'],
-            'balance' => $totals['balance'],
-            'exceededCount' => $totals['exceededCount'],
-            'accountCount' => $filtered->count(),
-        ];
-
-        return Inertia::render('Expenditure/Variance', [
-            'rows' => $this->paginate($request, $filtered),
+        return [
+            'rows' => $filtered->values(),
+            'monthCutoff' => $monthCutoff,
+            'filters' => $filters,
+            'droppedFilters' => $dropped,
+            'activeFiscalYear' => $activeFiscalYear,
+            'years' => $years->all(),
+            'fyNav' => $fyNav,
+            'hasAccess' => $hasAccess,
             'clusters' => $clusters,
             'institutions' => $institutions,
             'departments' => $departments,
             'descriptions' => $descriptions,
             'accounts' => $accounts,
-            'years' => $years->all(),
-            'months' => $this->monthHeadings((int) $activeFiscalYear),
-            'stats' => $stats,
-            'totals' => $totals,
-            'filters' => $filters,
-            'activeFiscalYear' => $activeFiscalYear,
-            'currentFiscalYear' => $currentFiscalYear,
-            'fyNav' => $fyNav,
-            'hasAccess' => $hasAccess,
-        ]);
+        ];
     }
 
     // =========================================================================
@@ -231,9 +404,11 @@ class VarianceController extends Controller
     /**
      * @return array<int,array{key:string,label:string,year:string,future:bool,quarterStart:bool}>
      */
-    private function monthHeadings(int $fiscalYear): array
+    private function monthHeadings(int $fiscalYear, ?int $cutoff = null): array
     {
-        $cutoff = $this->resolveCutoff($fiscalYear);
+        // Defaults to the elapsed cutoff for the outage path, which has no rows
+        // to derive a posted cutoff from.
+        $cutoff = $cutoff ?? $this->resolveCutoff($fiscalYear);
         $labels = $this->fiscalMonthLabels($fiscalYear);   // keyed 1..12, "OCT, 25"
 
         $out = [];

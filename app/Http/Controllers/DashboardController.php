@@ -5,21 +5,34 @@ namespace App\Http\Controllers;
 use App\Concerns\DashboardDataTransforms;
 use App\Concerns\ResolvesFiscalYear;
 use App\Concerns\ResolvesLedgerAccess;
+use App\Concerns\StreamsCsv;
 use App\Concerns\VersionsLedgerCache;
 use App\Models\BudgetAllocation;
 use App\Models\MonthlyExpenditure;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DashboardController extends Controller
 {
     use DashboardDataTransforms;
     use ResolvesFiscalYear;
     use ResolvesLedgerAccess;
+
+    // StreamsCsv directly, not ExportsReports: this page has no filters and no
+    // row collection, so none of that trait's guards apply to it.
+    use StreamsCsv;
     use VersionsLedgerCache;
+
+    private const EXPORT_UNAVAILABLE = 'The financial data source is unavailable. Please try again later.';
+
+    private const EXPORT_NO_ACCESS = 'Department access is not configured for your account, so there is nothing to export.';
+
+    private const EXPORT_NOT_STARTED = 'This fiscal year has not started yet, so there is nothing to export.';
 
     public function index(Request $request): Response
     {
@@ -81,6 +94,122 @@ class DashboardController extends Controller
             ),
             'expenditureByCategory' => $expenditure['byCategory'],
         ]);
+    }
+
+    // =========================================================================
+    // Export — 12 fiscal periods, on its own code path
+    // =========================================================================
+
+    /**
+     * The dashboard's monthly performance as CSV.
+     *
+     * DELIBERATELY NOT the shared table-export shape in App\Concerns\
+     * ExportsReports: this page has no row collection, no filter options and no
+     * row count, so those guards would have nothing to act on. It is built from
+     * budgetTotal(), expenditureData() and cumulativeSeries() — the same three
+     * the page itself uses — so the file and the KPI cards reconcile by
+     * construction rather than by a second implementation agreeing.
+     *
+     * There is no "category breakdown" CSV: expenditureData() caches only the
+     * topCategories(..., 8) DISPLAY shape (top eight plus Other), so exporting
+     * it would be a picture of the chart rather than data.
+     */
+    public function export(Request $request): StreamedResponse|RedirectResponse
+    {
+        $username = $request->user()->username;
+
+        if (! $this->hasLedgerAccess($username)) {
+            return $this->exportRedirect($request, self::EXPORT_NO_ACCESS);
+        }
+
+        [
+            'fiscalYear' => $fiscalYear,
+            'totalBudget' => $totalBudget,
+            'available' => $budgetAvailable,
+        ] = $this->budgetTotal($username, $request->input('fy'));
+
+        $cutoff = $this->resolveCutoff($fiscalYear);
+        $expenditure = $this->expenditureData($username, $fiscalYear, $cutoff);
+
+        // Both of these are the "never present a fake zero" rule, applied to a
+        // download: a file of 0.00 during an outage is indistinguishable from a
+        // real answer, and a fiscal year that has not started has nothing in it.
+        if (! $expenditure['available']) {
+            return $this->exportRedirect($request, self::EXPORT_UNAVAILABLE);
+        }
+
+        if ($cutoff === 0) {
+            return $this->exportRedirect($request, self::EXPORT_NOT_STARTED);
+        }
+
+        Log::info('CSV export started.', [
+            'page' => 'dashboard',
+            'username' => $username,
+            'fy' => $fiscalYear,
+            'rows' => 12,
+        ]);
+
+        return $this->streamCsv(
+            $this->csvFilename('dashboard-monthly-performance', $fiscalYear),
+            ['Financial Year', 'Period ID', 'Fiscal Month', 'Monthly Net Expenditure',
+                'Cumulative Net Expenditure', 'Annual Budget'],
+            fn () => $this->exportRows(
+                $fiscalYear,
+                $cutoff,
+                $expenditure['periodTotals'],
+                $totalBudget,
+                $budgetAvailable,
+            ),
+            ['page' => 'dashboard', 'username' => $username],
+        );
+    }
+
+    /**
+     * All 12 periods, so the file is a complete fiscal year.
+     *
+     * A FUTURE PERIOD LEAVES BOTH EXPENDITURE COLUMNS BLANK — "not started" and
+     * "genuinely zero activity" are different facts, and the dashboard already
+     * distinguishes them (cumulativeSeries() returns null past the cutoff). A
+     * HISTORICAL month with no rows keeps a numeric 0.00, because that is a
+     * real measurement.
+     *
+     * @param  array<int,array{PeriodID:int,TRXPeriod:string,total:float}>  $periodTotals
+     * @return \Generator<int,array<int,string>>
+     */
+    private function exportRows(
+        int $fiscalYear,
+        int $cutoff,
+        array $periodTotals,
+        float $totalBudget,
+        bool $budgetAvailable,
+    ): \Generator {
+        // The same series the burn-up chart draws — reused, not recomputed.
+        $cumulative = $this->cumulativeSeries($cutoff, $periodTotals);
+        $headings = $this->fiscalMonthHeadings($fiscalYear);
+
+        $byPeriod = [];
+        foreach ($periodTotals as $row) {
+            $byPeriod[$row['PeriodID']] = $row['total'];
+        }
+
+        for ($periodId = 1; $periodId <= 12; $periodId++) {
+            $future = $periodId > $cutoff;
+
+            yield [
+                $this->csvText((string) $fiscalYear),
+                $this->csvText((string) $periodId),
+                $this->csvText($headings[$periodId - 1]),
+                $future ? '' : $this->csvMoney($byPeriod[$periodId] ?? 0.0),
+                $future ? '' : $this->csvMoney($cumulative[$periodId - 1] ?? 0.0),
+                // No fake budget line when the budget source is unavailable.
+                $budgetAvailable ? $this->csvMoney($totalBudget) : '',
+            ];
+        }
+    }
+
+    private function exportRedirect(Request $request, string $message): RedirectResponse
+    {
+        return redirect()->route('dashboard', $request->query())->with('warning', $message);
     }
 
     /**

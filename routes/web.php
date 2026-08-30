@@ -37,6 +37,23 @@ Route::middleware(['auth', 'active.user'])->group(function () {
     // mapping is inherited through vw_WebAppUserAccess, and there are no roles.
     Route::get('/encumbered-details', [EncumberedDetailsController::class, 'index'])->name('encumbered-details.index');
     Route::get('/routing-details', [RoutingDetailsController::class,  'index'])->name('routing-details.index');
+
+    // CSV exports. Each streams the WHOLE filtered set for the active fiscal
+    // year — `page` is presentation state and is ignored. GET, because an
+    // export is read-only and its scope is already expressed in the query
+    // string; the links are plain browser navigations, never Inertia visits.
+    //
+    // Deliberately NOT throttled: a bare 429 is the one response that would
+    // bypass the redirect-with-warning error mode every export uses. If
+    // throttling is ever needed, add a NAMED limiter whose response() returns
+    // that same redirect. There is no export route for the retired
+    // /department-expenditure or /allocation-line-expenditure URLs.
+    Route::get('/budget-allocations/export', [BudgetAllocationController::class,  'export'])->name('budget-allocations.export');
+    Route::get('/monthly-expenditure/export', [MonthlyExpenditureController::class, 'export'])->name('monthly-expenditure.export');
+    Route::get('/variance/export', [VarianceController::class, 'export'])->name('variance.export');
+    Route::get('/encumbered-details/export', [EncumberedDetailsController::class, 'export'])->name('encumbered-details.export');
+    Route::get('/routing-details/export', [RoutingDetailsController::class,  'export'])->name('routing-details.export');
+    Route::get('/dashboard/export', [DashboardController::class, 'export'])->name('dashboard.export');
 });
 
 // Logout

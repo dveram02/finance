@@ -29,6 +29,11 @@ class RetiredRoutesTest extends TestCase
         return [
             'department expenditure' => ['/department-expenditure'],
             'allocation line expenditure' => ['/allocation-line-expenditure'],
+            // The CSV exports follow the same boundary. Adding an export route
+            // for a retired page would quietly resurrect the URL, and this is
+            // the only thing that would notice.
+            'department expenditure export' => ['/department-expenditure/export'],
+            'allocation line expenditure export' => ['/allocation-line-expenditure/export'],
         ];
     }
 

@@ -31,6 +31,7 @@ ChartJS.register(
 
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
 import FiscalYearHero from '@/Components/FiscalYearHero.vue'
+import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 
 const { isDark } = useDarkMode()
@@ -70,6 +71,15 @@ const goToFy = (fy) => router.get(route('dashboard'), { fy: String(fy) }, {
 })
 
 useFiscalYearNav({ fyNav: () => props.fyNav, goToFy })
+
+// ── Export ────────────────────────────────────────────────────────────────────
+// The active year is the only scope this page has. Guarded like SideBar.vue
+// does: a missing Ziggy degrades to a disabled button, not a blank page.
+const exportUrl = computed(() =>
+  typeof route === 'function'
+    ? route('dashboard.export', { fy: String(props.activeFiscalYear ?? '') })
+    : null
+)
 
 // Every figure on the page is fiscal-year scoped, so a year change re-queries
 // SQL Server. Without this the page looks frozen on a cold cache.
@@ -385,6 +395,18 @@ const categoryBarOptions = computed(() => ({
       :fy-nav="fyNav"
       @select="goToFy"
     />
+
+    <!-- This page has no Filters bar, so the action sits under the year rail.
+         Row count is a fixed 12 — the export is always a whole fiscal year. -->
+    <div class="flex justify-end">
+      <ExportCsvButton
+        :href="exportUrl"
+        :row-count="12"
+        :busy="loading"
+        :has-access="hasAccess && expenditureAvailable && expenditureWindowStarted"
+        label="Export monthly performance"
+      />
+    </div>
 
     <NoAccessNotice v-if="!hasAccess" />
 

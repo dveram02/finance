@@ -51,6 +51,83 @@ trait ResolvesFiscalYear
     }
 
     /**
+     * The last fiscal period to SHOW as a figure, given what has actually posted.
+     *
+     * resolveCutoff() answers "how much of this year has ELAPSED", which for the
+     * current fiscal year includes the month we are standing in. The ledger,
+     * though, carries only POSTED GL, and the in-progress month has normally not
+     * posted yet: measured 2026-08-29 (fiscal period 11 = August), FY2026 held
+     * 492 accounts with July activity and ZERO with August, and
+     * dbo.MonthlyExpenditure emitted no August rows at all.
+     *
+     * Rendering that month as 0.00 asserts "nothing was spent in August" when
+     * the truth is "August has not been posted yet" — the same
+     * not-started-versus-real-zero distinction the dashboard makes with its
+     * null-past-the-cutoff series. So for the CURRENT fiscal year the boundary
+     * is the earlier of the elapsed cutoff and the last period carrying data.
+     *
+     * A PAST fiscal year is never capped. A completed year whose September was
+     * genuinely empty must keep its 0.00 — that is a real measurement, and
+     * blanking it would be inventing an absence.
+     *
+     * The caller must pass the UNFILTERED rows for the year: the boundary is a
+     * property of the posting calendar, not of whichever department is on
+     * screen, and deriving it from a filtered set would move the blanks around
+     * as the user filters.
+     *
+     * @param  iterable<int,array<string,mixed>>  $rows
+     * @param  array<int,string>  $monthKeys  month columns in PeriodID order
+     */
+    protected function postedCutoff(int $fiscalYear, iterable $rows, array $monthKeys): int
+    {
+        $elapsed = $this->resolveCutoff($fiscalYear);
+
+        if ($fiscalYear !== $this->currentFiscalYear()) {
+            return $elapsed;
+        }
+
+        $lastPopulated = 0;
+        foreach ($rows as $row) {
+            foreach ($monthKeys as $i => $key) {
+                $period = $i + 1;
+                if ($period > $lastPopulated && ((float) ($row[$key] ?? 0)) !== 0.0) {
+                    $lastPopulated = $period;
+                }
+            }
+        }
+
+        return min($elapsed, $lastPopulated);
+    }
+
+    /**
+     * The 12 fiscal-month headings with a FOUR-DIGIT year — "Oct 2025" … "Sep 2026".
+     *
+     * For exports, where the screen's "OCT, 25" is ambiguous out of context: a
+     * fiscal year spans two calendar years, and a reader opening the file in a
+     * spreadsheet months later has nothing on the row to tell them which one
+     * October belongs to.
+     *
+     * Returned as a 0-indexed list in PeriodID order, so it lines up index for
+     * index with FinanceLedger::MONTHS. Derived from fiscalMonthLabels() rather
+     * than re-deriving the calendar, so there is one Oct->Sep rule.
+     *
+     * @return array<int,string>
+     */
+    protected function fiscalMonthHeadings(int $fiscalYear): array
+    {
+        $out = [];
+
+        foreach ($this->fiscalMonthLabels($fiscalYear) as $periodId => $label) {
+            [$abbr] = explode(', ', $label);
+
+            // PeriodID 1-3 are Oct-Dec of the PRIOR calendar year.
+            $out[] = ucfirst(strtolower($abbr)).' '.($fiscalYear - ($periodId <= 3 ? 1 : 0));
+        }
+
+        return $out;
+    }
+
+    /**
      * The last fiscal period to include for a displayed FY:
      *   past FY    → 12 (complete year)
      *   current FY → current fiscal period (months elapsed so far)
