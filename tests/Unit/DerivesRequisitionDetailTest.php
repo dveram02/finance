@@ -123,6 +123,79 @@ class DerivesRequisitionDetailTest extends TestCase
         $this->assertFalse($complete['PartiallyReceived']);
     }
 
+    /**
+     * The regression net for the Access-parity change.
+     *
+     * `Quantity` used to be floored at zero in SQL, so `> 0` was a safe test for
+     * "has a balance". Parity removed the floor, so an OVER-received line is now
+     * negative — and `> 0` classed it as fully unshipped, muting in the table the
+     * one row that most needs a human to look at it. See financeupdatesep.md A7b.
+     */
+    public function test_an_over_received_line_is_flagged_rather_than_read_as_fully_unshipped(): void
+    {
+        $over = $this->deriveRequisitionRow($this->detailRow([
+            'OrderQuantity' => 1.0,
+            'QtyShipped' => 2.0,
+            'Quantity' => -1.0,
+            'UnitCost' => 48000.0,
+            'ExtendedCost' => -48000.0,
+        ]), self::COLUMNS);
+
+        $this->assertTrue($over['PartiallyReceived'], 'An over-received line still has a receipt and a non-zero balance.');
+        $this->assertTrue($over['OverShipped']);
+        $this->assertSame(-48000.0, $over['ExtendedCost'], 'A negative commitment must survive unclamped.');
+        $this->assertSame(-1.0, $over['Quantity']);
+    }
+
+    public function test_over_shipped_is_false_for_every_ordinary_line(): void
+    {
+        foreach ([
+            'untouched' => [],
+            'partial' => ['QtyShipped' => 40.0, 'Quantity' => 60.0],
+            'complete' => ['QtyShipped' => 100.0, 'Quantity' => 0.0],
+        ] as $label => $overrides) {
+            $row = $this->deriveRequisitionRow($this->detailRow($overrides), self::COLUMNS);
+            $this->assertFalse($row['OverShipped'], "{$label} should not be flagged over-shipped.");
+        }
+    }
+
+    /**
+     * Totals must carry the negative through rather than clamping it, or the
+     * page stops tying to the ledger's Approved - which is exactly the
+     * disagreement Phase 2's reconciliation gate exists to prevent.
+     */
+    public function test_totals_carry_a_negative_commitment_through(): void
+    {
+        $totals = $this->requisitionTotals(new Collection([
+            $this->deriveRequisitionRow($this->detailRow(['ExtendedCost' => 193650.0]), self::COLUMNS),
+            $this->deriveRequisitionRow($this->detailRow([
+                'RequisitionNumber' => 'REQ0002', 'ExtendedCost' => -64550.0, 'Quantity' => -1.0, 'QtyShipped' => 2.0,
+            ]), self::COLUMNS),
+        ]));
+
+        $this->assertSame(129100.0, $totals['committed']);
+        $this->assertSame(2, $totals['lines']);
+    }
+
+    /**
+     * `largest` means the biggest commitment, not the biggest absolute number. A
+     * large negative is a data condition, not the headline figure for the card.
+     */
+    public function test_the_largest_line_is_the_maximum_not_the_maximum_absolute(): void
+    {
+        $totals = $this->requisitionTotals(new Collection([
+            $this->deriveRequisitionRow($this->detailRow([
+                'ItemDescription' => 'A modest commitment', 'ExtendedCost' => 500.0,
+            ]), self::COLUMNS),
+            $this->deriveRequisitionRow($this->detailRow([
+                'RequisitionNumber' => 'REQ0002', 'ItemDescription' => 'An over-receipt', 'ExtendedCost' => -900000.0,
+            ]), self::COLUMNS),
+        ]));
+
+        $this->assertSame(500.0, $totals['largest']['amount']);
+        $this->assertSame('A modest commitment', $totals['largest']['label']);
+    }
+
     // =========================================================================
     // Totals
     // =========================================================================

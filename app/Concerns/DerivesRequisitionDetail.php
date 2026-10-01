@@ -15,12 +15,15 @@ use Illuminate\Support\Collection;
  *
  *   OrderQuantity  what was ordered on the line.
  *   QtyShipped     what has been received against it.
- *   Quantity       the UNSHIPPED BALANCE (the view aliases ActBalance to this),
- *                  floored at zero so an over-shipped line is not a negative
- *                  commitment.
+ *   Quantity       the UNSHIPPED BALANCE (the view aliases ActBalance to this).
+ *                  SIGNED, and NOT floored at zero: an over-received line is
+ *                  negative. That is Access's rule, which the portal now
+ *                  reproduces deliberately — see financeupdatesep.md.
  *   ExtendedCost   Quantity x UnitCost — the commitment NET OF RECEIPTS, not
  *                  the source table's raw ExtendedCost, which double-counts a
  *                  received line (once as a commitment, again as GL actual).
+ *                  Can therefore be NEGATIVE; do not clamp it here or in the
+ *                  CSV, and never route it through csvText().
  *
  * So ExtendedCost summed over AP/PO lines IS the summary's Approved for that
  * account, and over RT/HD/PN lines IS its Routing. That equality is enforced in
@@ -57,8 +60,19 @@ trait DerivesRequisitionDetail
         // Recorded here rather than in SQL so the table can mute a fully
         // unshipped line without the template restating the rule. A partially
         // received line still carries a commitment; that is the interesting case.
-        $out['PartiallyReceived'] = ((float) ($row['QtyShipped'] ?? 0)) > 0
-            && ((float) ($row['Quantity'] ?? 0)) > 0;
+        //
+        // `!== 0.0`, NOT `> 0`. Since the Access-parity change removed the zero
+        // floor, `Quantity` is a signed balance: an OVER-shipped line is
+        // negative, and `> 0` classed it as fully unshipped — muting the row
+        // that most needs looking at. See financeupdatesep.md A7b.
+        $qtyShipped = (float) ($row['QtyShipped'] ?? 0);
+        $balance = (float) ($row['Quantity'] ?? 0);
+
+        $out['PartiallyReceived'] = $qtyShipped > 0 && $balance !== 0.0;
+        // Over-received: more delivered than ordered, so the commitment is
+        // negative. Its own state because it is a data condition to investigate,
+        // not a normal stage of a requisition's life.
+        $out['OverShipped'] = $balance < 0;
 
         return $out;
     }

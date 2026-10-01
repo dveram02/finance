@@ -1,8 +1,7 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
-import FiscalYearHero from '@/Components/FiscalYearHero.vue'
 import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 import SnapshotFreshness from '@/Components/SnapshotFreshness.vue'
@@ -57,12 +56,16 @@ const props = defineProps({
     filters: Object,
     activeFiscalYear: [Number, String],
     currentFiscalYear: [Number, String],
-    fyNav: Object,
     snapshot: { type: Object, default: () => ({ refreshedAt: null, age: null }) },
     unsummarisedYears: { type: Array, default: () => [] },
 })
 
-// ── Filter state (categorical only — FY is steered by the hero navigator) ───────
+// ── Filter state ────────────────────────────────────────────────────────────────
+// Fiscal year is a FILTER on these two pages, not a banner — there is no hero,
+// no year rail and no prev/next stepper here. It is still always set (there is
+// no "All Years" option), which is why activeFilterCount below excludes it and
+// clearFilters preserves it.
+//
 // `years` comes back from SQL as strings and activeFiscalYear is a PHP int, so
 // both sides of every v-model comparison are normalised with String().
 const filters = ref({
@@ -99,27 +102,41 @@ const applyFilters = () => {
     })
 }
 
-const goToFy = (fy) => {
-    filters.value.fy = String(fy)
-    applyFilters()
-}
+// Re-seed the local filter state from what the server actually honoured.
+//
+// `applyFilters` visits with preserveState, so this component instance — and its
+// `filters` ref — survives the response. When the fiscal year changes, a
+// categorical value that is no longer a valid option in the new year is dropped
+// server-side by validFilter() and comes back null, but without this the local
+// ref would keep the old value: the <select> would show an option it no longer
+// has (rendering blank) while the table showed unfiltered rows. The server is
+// the authority on which filters survived, so take its answer.
+watch(() => props.filters, (applied) => {
+    filters.value = {
+        cluster: applied.cluster ?? '',
+        institution: applied.institution ?? '',
+        department: applied.department ?? '',
+        account: applied.account ?? '',
+        vendor: applied.vendor ?? '',
+        status: applied.status ?? '',
+        fy: props.activeFiscalYear != null ? String(props.activeFiscalYear) : '',
+    }
+})
 
 // ── Wide-table scrolling and the arrow keys ─────────────────────────────────
-// Arrows scroll the table while the pointer or focus is in it, and step fiscal
-// years otherwise — the same split Monthly Expenditure uses. Returning false
-// when there is no adjacent year lets the composable leave the event alone
-// rather than swallowing it at the ends of the rail.
-const stepYear = (fy) => {
-    if (fy == null) return false
-    goToFy(fy)
-}
-
+// Arrows scroll the table's columns while the pointer or focus is in it, and do
+// NOTHING otherwise. These two pages deliberately have no page-level fiscal-year
+// stepping: the year is a filter here, not a banner, so there is no rail for an
+// arrow key to walk. `onPrevYear`/`onNextYear` are therefore left unset —
+// useTableScroll guards with `if (step && step() !== false)`, so omitting them
+// leaves the event alone outside the table instead of swallowing it.
+//
+// The four pages that kept the hero still step years with the arrows, via
+// useFiscalYearNav or useLedgerTable. Do not fold the two behaviours together.
 const {
     scroller, canScroll, pointerInTable, tableFocused, arrowsScrollTable,
 } = useTableScroll({
     rowCount: () => props.rows?.data?.length ?? 0,
-    onPrevYear: () => stepYear(props.fyNav?.prev),
-    onNextYear: () => stepYear(props.fyNav?.next),
 })
 
 const filteredInstitutions = computed(() => {
@@ -227,26 +244,12 @@ const formatDate = (value) => {
             <SnapshotFreshness class="mt-2" :refreshed-at="snapshot?.refreshedAt" :age="snapshot?.age" />
         </div>
 
-        <FiscalYearHero
-            :active-fiscal-year="activeFiscalYear"
-            :current-fiscal-year="currentFiscalYear"
-            :years="years"
-            :fy-nav="fyNav"
-            @select="goToFy"
-        />
-
-        <!-- Fiscal years the detail holds but the summary does not. Named rather
-             than silently dropped: the rows exist, they simply cannot be tied
-             back to an allocation, so drilling into them would show detail that
-             reconciles against nothing. -->
-        <p v-if="unsummarisedYears?.length" class="text-center text-xs text-tx-subtle">
-            <i class="fas fa-circle-info text-[10px] mr-1" aria-hidden="true"></i>
-            FY {{ unsummarisedYears.join(', ') }}
-            <template v-if="unsummarisedYears.length === 1">has</template><template v-else>have</template>
-            requisition detail but no budget ledger, so
-            <template v-if="unsummarisedYears.length === 1">it is</template><template v-else>they are</template>
-            not offered here.
-        </p>
+        <!-- No FiscalYearHero here, deliberately. These two pages are drill-downs
+             into a single account line, so the year belongs with the other things
+             that narrow the set — it is a required select in the Filters card
+             below. The four summary pages keep the hero; do not reintroduce it
+             here, and do not give this page prev/next year controls or
+             page-level arrow-key year stepping. -->
 
         <!-- ════════════════════════════ KPI cards ════════════════════════════════ -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -357,9 +360,38 @@ const formatDate = (value) => {
                 </div>
             </div>
 
-            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <!-- lg:grid-cols-4 with Account spanning two gives seven controls in
+                 two clean rows. The old six-control layout was grid-cols-6 with
+                 every cell col-span-2; adding a seventh there left an orphan. -->
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
-                <div class="lg:col-span-2">
+                <!-- Fiscal year. Required — there is no "All Years" option, because
+                     every figure on this page is scoped to one year and the export
+                     link carries it. Changing it re-visits immediately; any
+                     categorical filter that is not an option in the new year is
+                     dropped server-side and re-seeded by the watch above. -->
+                <div>
+                    <label class="block text-xs font-medium text-tx-subtle mb-1">Fiscal Year</label>
+                    <select v-model="filters.fy" @change="applyFilters"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option v-for="year in years" :key="year" :value="String(year)">FY {{ year }}</option>
+                    </select>
+                    <!-- Fiscal years the detail holds but the summary does not.
+                         Named rather than silently dropped: the rows exist, they
+                         simply cannot be tied back to an allocation, so drilling
+                         into them would show detail that reconciles against
+                         nothing. Sits here because it explains this control. -->
+                    <p v-if="unsummarisedYears?.length" class="mt-1.5 text-xs text-tx-subtle">
+                        <i class="fas fa-circle-info text-[10px] mr-1" aria-hidden="true"></i>
+                        FY {{ unsummarisedYears.join(', ') }}
+                        <template v-if="unsummarisedYears.length === 1">has</template><template v-else>have</template>
+                        requisition detail but no budget ledger, so
+                        <template v-if="unsummarisedYears.length === 1">it is</template><template v-else>they are</template>
+                        not offered here.
+                    </p>
+                </div>
+
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Cluster</label>
                     <select v-model="filters.cluster" @change="onClusterChange"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
@@ -368,7 +400,7 @@ const formatDate = (value) => {
                     </select>
                 </div>
 
-                <div class="lg:col-span-2">
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Institution</label>
                     <select v-model="filters.institution" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
@@ -379,7 +411,7 @@ const formatDate = (value) => {
                     </select>
                 </div>
 
-                <div class="lg:col-span-2">
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Department</label>
                     <select v-model="filters.department" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
@@ -399,7 +431,7 @@ const formatDate = (value) => {
                     </select>
                 </div>
 
-                <div class="sm:col-span-2 lg:col-span-2">
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Vendor</label>
                     <select v-model="filters.vendor" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
@@ -408,7 +440,7 @@ const formatDate = (value) => {
                     </select>
                 </div>
 
-                <div class="sm:col-span-2 lg:col-span-2">
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Status</label>
                     <select v-model="filters.status" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">

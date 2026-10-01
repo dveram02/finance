@@ -347,6 +347,14 @@ class MonthlyExpenditureController extends Controller
             ->orderBy('InstitutionName')
             ->orderBy('DepartmentName')
             ->orderBy('AccountNumber')
+            // Tiebreak, NOT cosmetic. Since the Access-parity change the ledger
+            // can hold TWO rows for one AccountNumber (the GL and COA spellings
+            // of its description differ), so AccountNumber alone is not a unique
+            // ordering. Pagination is applied in memory over this order and the
+            // CSV export streams the same set, so without a deterministic
+            // tiebreak ?page=1 and ?page=2 can overlap or drop a row between
+            // requests. See financeupdatesep.md B6.
+            ->orderBy('AccountDescription')
             ->get()
             ->map(function ($row) use ($columns) {
                 $out = [];

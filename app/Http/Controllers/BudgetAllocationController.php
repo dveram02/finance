@@ -361,7 +361,10 @@ class BudgetAllocationController extends Controller
             ->orderBy('ClusterName')
             ->orderBy('InstitutionName')
             ->orderBy('DepartmentName')
-            ->orderBy('AccountNumber');
+            ->orderBy('AccountNumber')
+            // See financeupdatesep.md B6 - a split account has two rows sharing
+            // one AccountNumber, so this is what makes the order deterministic.
+            ->orderBy('AccountDescription');
     }
 
     /**

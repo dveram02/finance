@@ -41,8 +41,12 @@ class RequisitionDetailTest extends TestCase
     private const PROPS = [
         'rows', 'clusters', 'institutions', 'departments', 'accounts', 'vendors',
         'statuses', 'years', 'totals', 'filters', 'activeFiscalYear',
-        'currentFiscalYear', 'fyNav', 'hasAccess', 'snapshot', 'unsummarisedYears',
+        'currentFiscalYear', 'hasAccess', 'snapshot', 'unsummarisedYears',
     ];
+    // No 'fyNav'. These two pages have no fiscal-year banner, rail or prev/next
+    // stepper — the year is a required select in their Filters card — so there is
+    // nothing for prev/next to drive. The four summary pages still pass it, and
+    // ResolvesFiscalYear::fiscalYearNav() is still theirs.
 
     #[DataProvider('pages')]
     public function test_the_page_renders_with_the_full_prop_shape(string $url, string $component, array $statuses): void
@@ -83,14 +87,17 @@ class RequisitionDetailTest extends TestCase
     }
 
     /**
-     * The rail must not offer a fiscal year the ledger has never built.
+     * The fiscal-year DROPDOWN must not offer a year the ledger has never built.
      *
      * Measured on production 2026-08-27, the requisition snapshot holds
      * FY2010-FY2026 while the ledger holds FY2014-FY2026. Offering FY2010-2013
      * would let a user drill into detail that reconciles against nothing.
+     *
+     * `years` feeds the select in the Filters card; it used to feed the hero's
+     * year rail. Same prop, same bound, different control.
      */
     #[DataProvider('pages')]
-    public function test_the_fiscal_year_rail_is_bounded_to_years_the_ledger_has(string $url, string $component, array $statuses): void
+    public function test_the_fiscal_year_dropdown_is_bounded_to_years_the_ledger_has(string $url, string $component, array $statuses): void
     {
         $user = $this->requisitionUser();
 
@@ -161,6 +168,65 @@ class RequisitionDetailTest extends TestCase
 
         $this->assertLessThan($unfiltered['rows']['total'], $filtered['rows']['total']);
         $this->assertSame($unfiltered['departments'][0], $filtered['filters']['department']);
+    }
+
+    /**
+     * The year select posts ?fy=, so these assert the SERVER half of the control.
+     * Nothing about the dropdown needed a controller change - resolveFiscalYear()
+     * already regex-gates a four-digit string and falls back - and these exist to
+     * keep that true.
+     */
+    #[DataProvider('pages')]
+    public function test_the_fy_parameter_selects_that_year(string $url, string $component, array $statuses): void
+    {
+        $user = $this->requisitionUser();
+
+        $props = $this->actingAs($user)->get($url)->assertOk()->viewData('page')['props'];
+
+        if (count($props['years']) < 2) {
+            $this->markTestSkipped('Premise failed: fewer than two selectable years, so switching cannot be observed.');
+        }
+
+        // Any year other than the one that resolved by default.
+        $other = collect($props['years'])
+            ->first(fn ($y) => (int) $y !== (int) $props['activeFiscalYear']);
+
+        $switched = $this->actingAs($user)->get($url.'?fy='.$other)->assertOk()->viewData('page')['props'];
+
+        $this->assertSame((int) $other, (int) $switched['activeFiscalYear']);
+        $this->assertSame((int) $other, (int) $switched['filters']['fy']);
+    }
+
+    /**
+     * An out-of-range or malformed year must fall back, never 500 and never
+     * produce an empty page that reads as missing data. Note `fy` deliberately
+     * does NOT go through validFilter(), so it can never trigger the export's
+     * stale-filter refusal - it silently resolves instead.
+     */
+    #[DataProvider('pages')]
+    public function test_an_unusable_fy_falls_back_to_a_year_that_has_data(string $url, string $component, array $statuses): void
+    {
+        $user = $this->requisitionUser();
+
+        $baseline = $this->actingAs($user)->get($url)->assertOk()->viewData('page')['props'];
+
+        foreach (['9999', 'abc', '20261', ''] as $bad) {
+            $props = $this->actingAs($user)->get($url.'?fy='.$bad)->assertOk()->viewData('page')['props'];
+
+            $this->assertSame(
+                (int) $baseline['activeFiscalYear'],
+                (int) $props['activeFiscalYear'],
+                "?fy={$bad} should have fallen back to the default year."
+            );
+
+            if ($props['years'] !== []) {
+                $this->assertContains(
+                    (string) $props['activeFiscalYear'],
+                    array_map('strval', $props['years']),
+                    "?fy={$bad} resolved to a year that is not selectable."
+                );
+            }
+        }
     }
 
     #[DataProvider('pages')]

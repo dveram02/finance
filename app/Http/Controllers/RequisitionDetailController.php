@@ -96,7 +96,6 @@ abstract class RequisitionDetailController extends Controller
             'filters' => $r['filters'],
             'activeFiscalYear' => $r['activeFiscalYear'],
             'currentFiscalYear' => $currentFiscalYear,
-            'fyNav' => $r['fyNav'],
             'hasAccess' => $r['hasAccess'],
             'snapshot' => $r['snapshot'],
             // Fiscal years the detail holds but the ledger does not, so the page
@@ -249,7 +248,7 @@ abstract class RequisitionDetailController extends Controller
      * @return array{rows:Collection<int,array<string,mixed>>, filters:array<string,mixed>,
      *               droppedFilters:array<int,string>, activeFiscalYear:?int,
      *               years:array<int,string>, unsummarisedYears:array<int,string>,
-     *               fyNav:array{prev:?int,next:?int}, hasAccess:bool,
+     *               hasAccess:bool,
      *               snapshot:array{refreshedAt:string|null,age:string|null},
      *               clusters:array, institutions:array, departments:array,
      *               accounts:array, vendors:array, statuses:array}
@@ -264,7 +263,6 @@ abstract class RequisitionDetailController extends Controller
         $years = collect($yearData['years']);
 
         $activeFiscalYear = $this->resolveFiscalYear($request->input('fy'), $years, $currentFiscalYear);
-        $fyNav = $this->fiscalYearNav($activeFiscalYear, $years);
         $filters['fy'] = $activeFiscalYear;
 
         $hasAccess = $this->userHasLedgerAccess($username);
@@ -348,7 +346,6 @@ abstract class RequisitionDetailController extends Controller
             'activeFiscalYear' => $activeFiscalYear,
             'years' => $years->all(),
             'unsummarisedYears' => $yearData['unsummarised'],
-            'fyNav' => $fyNav,
             'hasAccess' => $hasAccess,
             'snapshot' => $snapshot,
             'clusters' => $clusters,
@@ -562,7 +559,6 @@ abstract class RequisitionDetailController extends Controller
             'filters' => $filters,
             'activeFiscalYear' => $filters['fy'],
             'currentFiscalYear' => $currentFiscalYear,
-            'fyNav' => ['prev' => null, 'next' => null],
             // True on an outage: the access probe could not run, so we do not
             // know, and must not tell the user they have no permissions.
             'hasAccess' => true,

@@ -23,7 +23,6 @@ defineProps({
     filters: Object,
     activeFiscalYear: [Number, String],
     currentFiscalYear: [Number, String],
-    fyNav: Object,
     snapshot: Object,
     unsummarisedYears: Array,
 })
@@ -50,7 +49,6 @@ defineProps({
         :filters="filters"
         :active-fiscal-year="activeFiscalYear"
         :current-fiscal-year="currentFiscalYear"
-        :fy-nav="fyNav"
         :snapshot="snapshot"
         :unsummarised-years="unsummarisedYears"
     />
