@@ -1,5 +1,30 @@
 # CSV Export — Implementation Plan
 
+> ### ⚠️ Dated supersession — 2026-10-01
+>
+> **The "3,408-row ceiling" this document rests on is superseded**, and so is one money rule.
+> `routingupdate.md` made fiscal year an **optional** filter on Encumbered Details and Routing
+> Details, defaulting to **every eligible year**. What changes here:
+>
+> | This document says | Now |
+> |---|---|
+> | Largest requisition set is **3,408 rows** (§57, §80, §702, §744, §854) | That was one user/FY. The all-years scope is **93,336 rows** for a user mapped to everything (416 for the only user mapped today). Measured 2026-10-01 |
+> | `Remaining Quantity` is "floored at zero" (§460) | **False since the Access-parity change** — `ActBalance` is SIGNED, so an over-received line is negative. `Extended Cost` likewise |
+> | Requisition filenames always carry an `fy` segment | With All selected there is **no `fy` segment**: `encumbered-details-20261001-143501.csv`. `csvFilename()` already handled `?int`; `StreamsCsv` is untouched |
+> | An export is refused for a stale filter | **And now for SCOPE SIZE.** Above `ledger.requisition.row_ceiling` the export is refused outright, never truncated — a file holding 25,000 of 93,336 rows reads as complete |
+>
+> **The in-memory decision STANDS** (§80, §702) and is now made *safe* rather than merely cheap:
+> the bounded fetch means the worst case is a refusal with an explanation, not an out-of-memory
+> 500. But its justification has changed, and that matters for whoever revisits it. The
+> SQL-cursor alternative is **re-opened pending** `routingupdate.md` §12 item 6 — not because
+> the refactor got easier (filter options still come from the fetched rows), but because the
+> premise it was rejected against no longer holds, and because a **single fiscal year over the
+> ceiling would have no route to the data through this page at all**, screen or file. That is the
+> trigger.
+>
+> Everything else in §11 "As built" still wins over §1–§10.
+
+
 Status: **BUILT 2026-08-29** on branch `feature/ledger-oversight-update`, not yet committed or
 merged. Revision 4 of the plan; see §9.2-§9.4 for the review history and **§11 for the as-built
 record**, which WINS wherever it and the plan above disagree.
@@ -55,7 +80,9 @@ Two constraints shape the design:
   `index()` on all four** and is entangled with option-list construction. That entanglement is the
   single most important structural fact in this plan (§4.2).
 - Largest measured single user/FY requisition set: **3,408 rows** (`RequisitionDetailController`
-  docblock).
+  docblock). **⚠️ Superseded 2026-10-01** — fiscal year is now optional on those two pages and the
+  all-years scope is **93,336 rows** worst case, 416 for the only mapped user. See the note at the
+  top of this file.
 - `decimal:2` / `decimal:4` model casts return **strings**, which is why every derivation does
   `(float) $row->{$column}`. The exporter must consume the derived collections, not
   `getAttributes()`.
@@ -77,7 +104,7 @@ Two constraints shape the design:
 | Month boundary | Blank what has not **POSTED**, not merely what has not elapsed (§5.6) | The in-progress month has no GL; `0.00` would assert a spend of zero |
 | No access / outage / zero rows | **Redirect back with a flashed warning** | Matches the app's degrade-visibly convention; a raw 403/422 is a dead end in a browser download |
 | **Stale/invalid filter value** | **Redirect and refuse** — do *not* silently drop it | §4.3. A screen shows you the filter reset; a CSV does not |
-| Streaming strategy | Reuse the existing in-memory path | Filter-option validation *requires* the full set; 3,408 rows does not justify a refactor |
+| Streaming strategy | Reuse the existing in-memory path | Filter-option validation *requires* the full set; 3,408 rows does not justify a refactor. **⚠️ 2026-10-01: that ceiling is now 93,336 for an all-years scope. The decision stands, made safe by a bounded fetch that REFUSES rather than truncates — see the supersession note at the top** |
 | Format | UTF-8 **with BOM**, RFC 4180 quoting, **CRLF**, no backslash escaping | Windows shop, Excel is the destination |
 | Numbers | Raw decimals — no `TTD`, no separators, **never apostrophe-prefixed** | So Excel can compute on them |
 | Identifiers | Byte-exact source value, leading zeros intact | §10.3 |
@@ -457,7 +484,9 @@ All 25 of `RequisitionDetailController::COLUMNS`, in their existing order, plus 
   is in the snapshot but is **not** in the controller's `COLUMNS`, so only the name is exported.
   The bare heading `Name` would be meaningless in a spreadsheet.
 - **`Remaining Quantity` is the row's `Quantity`** — the view aliases `ActBalance` to it. It is the
-  *unshipped balance*, floored at zero, and `Extended Cost` is already net of receipts. Carrying
+  *unshipped balance*, **SIGNED and not floored at zero** (the Access-parity change removed that
+  floor, so an over-received line is negative), and `Extended Cost` is already net of receipts
+  and likewise signed — which is exactly why neither may go through `csvText()`. Carrying
   `Order Quantity` and `Quantity Shipped` beside it makes that rule legible; the screen only exposes
   them in a tooltip. **Nothing here is re-derived in PHP.**
 - `PartiallyReceived` is excluded — it is a derived UI flag for muting a row, not data.
@@ -699,7 +728,7 @@ implementation; the requisition query really does read 25 fields while the scree
 
 | Its recommendation | Why not |
 |---|---|
-| Build the requisition export from a SQL cursor; refactor filter validation to distinct queries | Filter options are derived from the fetched rows — you cannot validate a filter without the full set. The refactor adds queries and risk to buy nothing at a measured 3,408-row ceiling. |
+| Build the requisition export from a SQL cursor; refactor filter validation to distinct queries | Filter options are derived from the fetched rows — you cannot validate a filter without the full set. The refactor adds queries and risk to buy nothing at a measured 3,408-row ceiling. **⚠️ RE-OPENED 2026-10-01**: that ceiling is now 93,336, and a single fiscal year over `row_ceiling` would have no route to the data at all. Deferred, not dismissed — `routingupdate.md` §6.4 and §12 item 6 carry the trigger. |
 | Dashboard `Remaining Budget` + `Budget Used Percent` | Not figures the page computes. Introduces a second, unfloored "remaining" beside Variance's `AllocationBalance`, which the two would disagree on for any overspent account. |
 | A second "full category breakdown" CSV | `expenditureData()` caches only the top-8-plus-`Other` display shape; a real full breakdown is a change to that cache, not a formatting choice. |
 | Hard `403` / `422` / `503` on bad states | A raw error page is a dead end in a browser download and contradicts the app's degrade-visibly convention. Replaced by a redirect with the page's own flashed-warning copy. *(Its underlying concern about invalid filters was right, and is addressed differently — see 9.2 #5.)* |

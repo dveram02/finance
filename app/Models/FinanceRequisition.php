@@ -80,6 +80,14 @@ class FinanceRequisition extends Model
         return $query->where('UserName', $username);
     }
 
+    /**
+     * NO LONGER USED BY THE TWO DETAIL PAGES. Since 2026-10-01 fiscal year is
+     * an optional filter there, so RequisitionDetailController binds a year
+     * LIST with whereIn() — one selected year, or every eligible year. Kept on
+     * the shared model for any future single-year reader; do not reintroduce it
+     * on those pages, where an unconditional whereIn is what enforces the
+     * eligible-year bound (routingupdate.md §4).
+     */
     public function scopeForYear(Builder $query, string $year): Builder
     {
         return $query->where('FinancialYear', $year);

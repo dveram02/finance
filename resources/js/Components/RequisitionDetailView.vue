@@ -6,6 +6,7 @@ import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 import SnapshotFreshness from '@/Components/SnapshotFreshness.vue'
 import { useTableScroll } from '@/composables/useTableScroll'
+import { fiscalYearSpan } from '@/fiscalYear'
 
 /**
  * The whole of both requisition detail pages.
@@ -58,13 +59,26 @@ const props = defineProps({
     currentFiscalYear: [Number, String],
     snapshot: { type: Object, default: () => ({ refreshedAt: null, age: null }) },
     unsummarisedYears: { type: Array, default: () => [] },
+
+    // ── The scope guard ─────────────────────────────────────────────────────
+    // True when the selection covers more requisition lines than the server
+    // will materialise, so NOTHING was counted. Every region that reports a
+    // quantity is gated on this: a refusal is not a measurement of zero, and
+    // rendering "TTD 0 · 0 requisitions · No requisition lines found" would
+    // announce an oversized result as an empty one — the fake zero CLAUDE.md
+    // forbids, in four places at once.
+    scopeRefused: { type: Boolean, default: false },
+    // Server-supplied, so the two cases (all-years vs a selected year, which
+    // have different recoveries) cannot drift from the controller's constants.
+    scopeRefusedMessage: { type: String, default: null },
 })
 
 // ── Filter state ────────────────────────────────────────────────────────────────
 // Fiscal year is a FILTER on these two pages, not a banner — there is no hero,
-// no year rail and no prev/next stepper here. It is still always set (there is
-// no "All Years" option), which is why activeFilterCount below excludes it and
-// clearFilters preserves it.
+// no year rail and no prev/next stepper here. Since 2026-10-01 it is also
+// OPTIONAL, defaulting to All Fiscal Years (= every year this route's detail
+// shares with the ledger), so activeFilterCount below COUNTS it and
+// clearFilters resets it to All like any other filter.
 //
 // `years` comes back from SQL as strings and activeFiscalYear is a PHP int, so
 // both sides of every v-model comparison are normalised with String().
@@ -119,6 +133,10 @@ watch(() => props.filters, (applied) => {
         account: applied.account ?? '',
         vendor: applied.vendor ?? '',
         status: applied.status ?? '',
+        // '' is All Fiscal Years. The server reports null for All, so this
+        // re-seeds the empty option rather than coercing to a concrete year —
+        // do NOT "tidy" this into `?? currentFiscalYear`, which would make the
+        // control required again and silently narrow the scope on every visit.
         fy: props.activeFiscalYear != null ? String(props.activeFiscalYear) : '',
     }
 })
@@ -149,19 +167,44 @@ const onClusterChange = () => {
     applyFilters()
 }
 
-// FY is always set, so it is excluded from the "refine" affordances.
-const activeFilterCount = computed(() =>
-    ['cluster', 'institution', 'department', 'account', 'vendor', 'status']
-        .filter(k => filters.value[k] !== '' && filters.value[k] != null).length
+const CATEGORICAL_FILTERS = ['cluster', 'institution', 'department', 'account', 'vendor', 'status']
+
+// Separate from activeFilterCount because the empty-state copy needs to say
+// "matching your filters" for a categorical narrowing but not for a chosen
+// year — the year is already named in the sentence before it.
+const categoricalFilterCount = computed(() =>
+    CATEGORICAL_FILTERS.filter(k => filters.value[k] !== '' && filters.value[k] != null).length
 )
 
+// FY COUNTS now. It is optional and defaults to All, so a chosen year is an
+// active filter exactly like a department. It was excluded while it was
+// required, when the badge would have read 1 on a virgin page.
+const activeFilterCount = computed(() =>
+    categoricalFilterCount.value + (filters.value.fy ? 1 : 0)
+)
+
+// "Clear all" returns the year to All, like every other control. While the year
+// was required it was deliberately preserved here.
 const clearFilters = () => {
     filters.value = {
         cluster: '', institution: '', department: '',
-        account: '', vendor: '', status: '', fy: filters.value.fy,
+        account: '', vendor: '', status: '', fy: '',
     }
     applyFilters()
 }
+
+// ── The period chip ─────────────────────────────────────────────────────────
+// Read-only. The year is changed in the Filters card; this only STATES the
+// scope, so an all-years table can never be read as one year's.
+const hasFiscalYear = computed(() => props.activeFiscalYear != null && props.activeFiscalYear !== '')
+const periodSpan = computed(() => fiscalYearSpan(props.activeFiscalYear))
+// `currentFiscalYear` has been passed since Phase 3 and never read — this is
+// its first use. Unreachable today: the current FY is 2027 and the newest
+// selectable year is 2026, so no year shows "Current" until FY2027 data lands.
+const isCurrentFiscalYear = computed(() =>
+    hasFiscalYear.value && String(props.activeFiscalYear) === String(props.currentFiscalYear)
+)
+
 
 // ── Loading state ───────────────────────────────────────────────────────────────
 // Driven by Inertia's global visit events so it covers the selects, the fiscal
@@ -238,21 +281,78 @@ const formatDate = (value) => {
 
         <!-- ════════════════════════════ Page header ══════════════════════════════ -->
         <div class="text-center">
-            <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">{{ title }}</h1>
+            <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
+                <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">{{ title }}</h1>
+
+                <!-- READ-ONLY period chip. Gold because it carries fiscal-year
+                     identity (CLAUDE.md's colour rule), NOT because it does
+                     anything: no button, no link, no tabindex, no handler, no
+                     hover state, no pointer cursor. The year is changed in the
+                     Filters card below. It exists so an all-years table can
+                     never be mistaken for a single year's.
+
+                     A bordered "context strip" briefly replaced this (2026-10-02)
+                     and was REMOVED the same day: it read as a fifth KPI card
+                     above four real ones, and the page is already a stack of
+                     cards. The facts it carried are all still on the page — the
+                     scope here, the summary column it drills into in moneyNote
+                     below, and the snapshot state in SnapshotFreshness. Do not
+                     reintroduce a banner in this slot. -->
+                <span class="inline-flex items-center gap-2 rounded-full bg-amber-100 ring-1 ring-amber-300/70
+                             px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800
+                             dark:bg-amber-400/15 dark:ring-amber-300/40 dark:text-amber-200">
+                    <i class="fas fa-calendar-day text-[10px]" aria-hidden="true"></i>
+                    <template v-if="hasFiscalYear">
+                        FY {{ activeFiscalYear }}
+                        <span class="font-normal normal-case tracking-normal">· {{ periodSpan }}</span>
+                        <span v-if="isCurrentFiscalYear" class="inline-flex items-center gap-1.5">
+                            ·
+                            <!-- motion-reduce:animate-none — the pulse is purely
+                                 decorative and some readers are vestibular-sensitive. -->
+                            <span class="relative flex h-1.5 w-1.5" aria-hidden="true">
+                                <span class="absolute inline-flex h-full w-full animate-ping motion-reduce:animate-none rounded-full bg-amber-300 opacity-75"></span>
+                                <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-300"></span>
+                            </span>
+                            Current
+                        </span>
+                    </template>
+                    <!-- "available", not a count. Accurate for N years, for one,
+                         for none, and for an outage where the number is UNKNOWN
+                         rather than zero — "All 0 fiscal years" would assert a
+                         measurement that was never taken, and "All 1 fiscal
+                         years" is ungrammatical. -->
+                    <template v-else>All available fiscal years</template>
+                </span>
+            </div>
+
             <p class="text-sm text-tx-subtle mt-1">{{ subtitle }}</p>
+            <!-- Names the summary column this page drills into ("the summary's
+                 Approved column, net of receipts…"), which is why no separate
+                 field for it is needed. -->
             <p class="text-xs text-tx-subtle/80 mt-1">{{ moneyNote }}</p>
-            <SnapshotFreshness class="mt-2" :refreshed-at="snapshot?.refreshedAt" :age="snapshot?.age" />
+            <SnapshotFreshness
+                class="mt-2"
+                :refreshed-at="snapshot?.refreshedAt"
+                :age="snapshot?.age"
+                :age-hours="snapshot?.ageHours"
+                :state="snapshot?.state"
+            />
         </div>
 
         <!-- No FiscalYearHero here, deliberately. These two pages are drill-downs
              into a single account line, so the year belongs with the other things
-             that narrow the set — it is a required select in the Filters card
-             below. The four summary pages keep the hero; do not reintroduce it
-             here, and do not give this page prev/next year controls or
-             page-level arrow-key year stepping. -->
+             that narrow the set — it is an OPTIONAL select in the Filters card
+             below, defaulting to All Fiscal Years, and the gold chip above
+             states whichever scope is in force. The four summary pages keep the
+             hero; do not reintroduce it here, and do not give this page
+             prev/next year controls or page-level arrow-key year stepping. -->
 
         <!-- ════════════════════════════ KPI cards ════════════════════════════════ -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Everything that reports a QUANTITY is gated on a resolved scope. A
+             refusal means "we did not count this", which is not "we counted
+             zero" — the same reason the outage path flashes a warning instead of
+             rendering TTD 0. -->
+        <div v-if="!scopeRefused" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
             <!-- Total committed -->
             <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
@@ -346,7 +446,11 @@ const formatDate = (value) => {
                     </span>
                 </div>
                 <div class="flex items-center gap-3">
+                <!-- The export refuses this same scope server-side, so showing
+                     it would be a dead control that blames the data ("no
+                     matching rows") for a size problem. -->
                 <ExportCsvButton
+                    v-if="!scopeRefused"
                     :href="exportUrl"
                     :row-count="exportRowCount"
                     :busy="loading"
@@ -360,20 +464,32 @@ const formatDate = (value) => {
                 </div>
             </div>
 
-            <!-- lg:grid-cols-4 with Account spanning two gives seven controls in
-                 two clean rows. The old six-control layout was grid-cols-6 with
-                 every cell col-span-2; adding a seventh there left an orphan. -->
+            <!-- Seven controls, all ONE cell wide, in a 4-column grid: Fiscal
+                 Year, Cluster, Institution, Department on the first row; Account,
+                 Vendor, Status on the second, which therefore ends in one empty
+                 cell. That trailing gap is accepted deliberately (asked for
+                 2026-10-02) — Account used to span two cells to fill the row and
+                 to give its long "DESCRIPTION (4-80400-H01-107-1157-00-000)"
+                 options room, but a filter that is visibly twice the width of
+                 every other one reads as more important than it is. Equal
+                 widths, one orphan cell. -->
             <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
-                <!-- Fiscal year. Required — there is no "All Years" option, because
-                     every figure on this page is scoped to one year and the export
-                     link carries it. Changing it re-visits immediately; any
-                     categorical filter that is not an option in the new year is
-                     dropped server-side and re-seeded by the watch above. -->
+                <!-- Fiscal year. OPTIONAL, defaulting to All — and "All" is this
+                     ROUTE's eligible set (the years its detail shares with the
+                     ledger: 11 for Encumbered, 3 for Routing on today's mapped
+                     user), enforced in the query, never every year the snapshot
+                     holds. Changing it re-visits immediately; any categorical
+                     filter that is not an option in the new scope is dropped
+                     server-side and re-seeded by the watch above.
+                     `years` arrives newest-first, so the most-wanted year is at
+                     the top. It stays ENABLED even in a refusal — it is the
+                     only recovery from an oversized scope. -->
                 <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Fiscal Year</label>
                     <select v-model="filters.fy" @change="applyFilters"
                         class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                        <option value="">All Fiscal Years</option>
                         <option v-for="year in years" :key="year" :value="String(year)">FY {{ year }}</option>
                     </select>
                     <!-- Fiscal years the detail holds but the summary does not.
@@ -393,8 +509,8 @@ const formatDate = (value) => {
 
                 <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Cluster</label>
-                    <select v-model="filters.cluster" @change="onClusterChange"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                    <select v-model="filters.cluster" @change="onClusterChange" :disabled="scopeRefused"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="">All Clusters</option>
                         <option v-for="cluster in clusters" :key="cluster" :value="cluster">{{ cluster }}</option>
                     </select>
@@ -402,8 +518,8 @@ const formatDate = (value) => {
 
                 <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Institution</label>
-                    <select v-model="filters.institution" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                    <select v-model="filters.institution" @change="applyFilters" :disabled="scopeRefused"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="">All Institutions</option>
                         <option v-for="inst in filteredInstitutions" :key="inst.Institution" :value="inst.Institution">
                             {{ inst.Institution }}
@@ -413,17 +529,17 @@ const formatDate = (value) => {
 
                 <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Department</label>
-                    <select v-model="filters.department" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                    <select v-model="filters.department" @change="applyFilters" :disabled="scopeRefused"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="">All Departments</option>
                         <option v-for="dept in departments" :key="dept" :value="dept">{{ dept }}</option>
                     </select>
                 </div>
 
-                <div class="sm:col-span-2 lg:col-span-2">
+                <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Account</label>
-                    <select v-model="filters.account" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                    <select v-model="filters.account" @change="applyFilters" :disabled="scopeRefused"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="">All Accounts</option>
                         <option v-for="acc in accounts" :key="acc.AccountNumber" :value="acc.AccountNumber">
                             {{ acc.AccountDescription }} ({{ acc.AccountNumber }})
@@ -433,8 +549,8 @@ const formatDate = (value) => {
 
                 <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Vendor</label>
-                    <select v-model="filters.vendor" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                    <select v-model="filters.vendor" @change="applyFilters" :disabled="scopeRefused"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="">All Vendors</option>
                         <option v-for="vendor in vendors" :key="vendor" :value="vendor">{{ vendor }}</option>
                     </select>
@@ -442,14 +558,25 @@ const formatDate = (value) => {
 
                 <div>
                     <label class="block text-xs font-medium text-tx-subtle mb-1">Status</label>
-                    <select v-model="filters.status" @change="applyFilters"
-                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition">
+                    <select v-model="filters.status" @change="applyFilters" :disabled="scopeRefused"
+                        class="w-full rounded-lg border border-line-input bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-transparent transition disabled:opacity-50 disabled:cursor-not-allowed">
                         <option value="">All Statuses</option>
                         <option v-for="s in statuses" :key="s.Status" :value="s.Status">
                             {{ s.StatusName || s.Status }}
                         </option>
                     </select>
                 </div>
+
+                <!-- Why the six above are off. They are not merely optionless:
+                     with no row set there are no options to offer, AND changing
+                     one could not rescue an oversized scope anyway — they are
+                     applied in memory after the bounded fetch, so they never
+                     reach SQL. Choosing a fiscal year is the only recovery. -->
+                <p v-if="scopeRefused" class="sm:col-span-2 lg:col-span-4 text-xs text-tx-subtle">
+                    <i class="fas fa-circle-info text-[10px] mr-1" aria-hidden="true"></i>
+                    Filters are unavailable until the selection is small enough to display.
+                    Choose a fiscal year first.
+                </p>
 
             </div>
         </div>
@@ -471,7 +598,19 @@ const formatDate = (value) => {
              header, frozen totals row, frozen identity columns, and arrow keys
              that scroll one column at a time. Shared via `ledger-table` in
              app.css and useTableScroll. -->
-        <div class="bg-surface rounded-xl shadow-sm border border-line overflow-hidden relative">
+        <!-- The refusal replaces the table ENTIRELY rather than sitting above an
+             empty one. Left in place, the table's own empty state would read
+             "No requisition lines found · Nothing in any fiscal year" — an
+             oversized result announcing itself as an empty one — and the totals
+             row and pagination would describe nothing. -->
+        <div v-if="scopeRefused"
+            class="rounded-xl border border-amber-300/70 bg-amber-50 p-5 text-sm text-amber-900
+                   dark:border-amber-300/40 dark:bg-amber-400/10 dark:text-amber-100">
+            <i class="fas fa-triangle-exclamation mr-2" aria-hidden="true"></i>
+            {{ scopeRefusedMessage }}
+        </div>
+
+        <div v-else class="bg-surface rounded-xl shadow-sm border border-line overflow-hidden relative">
 
             <div class="flex items-center justify-between gap-3 px-5 py-2.5 border-b border-line bg-surface-2">
                 <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-tx-subtle">
@@ -539,7 +678,7 @@ const formatDate = (value) => {
                             <th data-scroll-col class="px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider">Account Description</th>
                             <th data-scroll-col class="px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider">Date Created</th>
                             <th data-scroll-col class="px-2.5 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider">UofM</th>
-                            <th data-scroll-col class="px-2.5 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider" title="ActBalance — ordered less received, floored at zero. The quantity still on commitment.">Quantity</th>
+                            <th data-scroll-col class="px-2.5 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider" title="ActBalance — ordered less received. SIGNED, not floored at zero: an over-received line is negative. The quantity still on commitment.">Quantity</th>
                             <th data-scroll-col class="px-2.5 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider">Unit Cost</th>
                             <th data-scroll-col class="col-money px-3 py-3 text-right text-[11px] font-semibold text-tx-subtle uppercase tracking-wider" :title="moneyNote">Extended Cost</th>
                             <th data-scroll-col class="px-3 py-3 text-left text-[11px] font-semibold text-tx-subtle uppercase tracking-wider">Cluster</th>
@@ -565,8 +704,10 @@ const formatDate = (value) => {
                                     {{ hasAccess ? emptyLabel : 'Department access is not configured' }}
                                 </p>
                                 <p v-if="hasAccess" class="text-xs text-tx-muted mt-1">
-                                    Nothing in <span class="font-semibold">FY {{ activeFiscalYear }}</span>
-                                    <template v-if="activeFilterCount"> matching your filters</template>.
+                                    Nothing
+                                    <template v-if="hasFiscalYear">in <span class="font-semibold">FY {{ activeFiscalYear }}</span></template>
+                                    <template v-else>in any fiscal year</template>
+                                    <template v-if="categoricalFilterCount"> matching your filters</template>.
                                 </p>
                             </td>
                         </tr>

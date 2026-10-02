@@ -48,6 +48,14 @@ Route::middleware(['auth', 'active.user'])->group(function () {
     // throttling is ever needed, add a NAMED limiter whose response() returns
     // that same redirect. There is no export route for the retired
     // /department-expenditure or /allocation-line-expenditure URLs.
+    //
+    // The two requisition exports take ?fy as an OPTIONAL parameter (2026-10-01):
+    // absent means every ELIGIBLE fiscal year, and the filename then carries no
+    // fy segment. They are also the only two exports that can be refused for
+    // SCOPE SIZE rather than a stale filter — above the row ceiling they
+    // redirect with a warning rather than streaming a truncated file. See
+    // routingupdate.md 6.6. The other four exports are unchanged and
+    // single-year.
     Route::get('/budget-allocations/export', [BudgetAllocationController::class,  'export'])->name('budget-allocations.export');
     Route::get('/monthly-expenditure/export', [MonthlyExpenditureController::class, 'export'])->name('monthly-expenditure.export');
     Route::get('/variance/export', [VarianceController::class, 'export'])->name('variance.export');

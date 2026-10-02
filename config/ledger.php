@@ -111,6 +111,60 @@ return [
         // stay short: a user must never be told the data is fresher than the
         // cache they are being served from.
         'version_seconds' => (int) env('FINANCE_REQUISITION_VERSION_SECONDS', 60),
+
+        /*
+        | ── Snapshot staleness, ONE definition ─────────────────────────────
+        |
+        | The age at which the snapshot is called stale, in hours. Read by BOTH
+        | `ledger:status` (as its --max-age-hours default) and the two detail
+        | pages, which surface staleness in their context strip. That sharing is
+        | the point: two definitions of "stale" would drift, and the page would
+        | reassure a user the health check was already alerting on.
+        |
+        | 36h, because the Agent job runs daily at 21:30 — so anything past 36h
+        | means at least one nightly run was missed. Note a FAILED run is a
+        | separate signal, not an age: the refresh log is run-keyed and an
+        | aborted run appends an ABORTED row while the previous snapshot stands,
+        | so the newest row's Outcome is what reveals it. Freshness is measured
+        | against the last OK row; the alert is the newest row.
+        */
+        'max_age_hours' => (int) env('FINANCE_REQUISITION_MAX_AGE_HOURS', 36),
+
+        /*
+        | ── Bounded-fetch guard (routingupdate.md §6) ──────────────────────
+        |
+        | Since 2026-10-01 the fiscal year is an OPTIONAL filter on the two
+        | detail pages, so the default scope is every eligible year rather than
+        | one. detailRows() therefore fetches with LIMIT row_ceiling + 1 and
+        | getting ceiling + 1 rows back IS the too-large signal — one statement,
+        | no COUNT(*) pre-flight to race or bypass.
+        |
+        | INVARIANTS, enforced by App\Support\RequisitionScopeThresholds:
+        | row_ceiling >= 0; 0 DISABLES THE GUARD ENTIRELY (both refusal and
+        | warnings) and is not for production; row_warn is clamped below
+        | row_ceiling, and 0 disables warnings alone. Anything unparseable
+        | falls back to the DEFAULT, never to "no limit".
+        |
+        | Measured 2026-10-01 (CLI, full pipeline, peak process memory):
+        | 416 rows for the only mapped user; 93,336 rows / 558 MB unbounded if
+        | a user were mapped to everything; 25,001 rows / 172 MB bounded;
+        | largest SINGLE year 18,945. Production memory_limit is 4096M on a
+        | shared php.ini, so 25,000 is a USABILITY limit, not a memory one —
+        | 93,336 rows is a ~5.1 s response and 3,734 pages of 25.
+        |
+        | NOT (int) env(...) on purpose. `(int) 'abc'` is 0, and 0 is the
+        | explicit opt-out, so a typo in .env would SILENTLY DISABLE the guard.
+        | The raw value is passed through and validated in one place.
+        */
+
+        'row_ceiling' => env('FINANCE_REQUISITION_ROW_CEILING', 25000),
+
+        // A "watch this" line, not an error. 10,000 would fire on FOUR normal
+        // single-year AP/PO views for a broadly-mapped user (18,945 / 16,045 /
+        // 14,025 / 13,657), so it is set above the largest ordinary single
+        // year — re-set it once that is measured on production, or the signal
+        // is noise. Raw, as above.
+        'row_warn' => env('FINANCE_REQUISITION_ROW_WARN', 20000),
     ],
 
 ];

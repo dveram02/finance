@@ -35,7 +35,7 @@ use Illuminate\Support\Facades\DB;
 class LedgerStatus extends Command
 {
     protected $signature = 'ledger:status
-                            {--max-age-hours=36 : Age at which a snapshot is considered stale}
+                            {--max-age-hours= : Age at which a snapshot is considered stale; defaults to ledger.requisition.max_age_hours}
                             {--max-drift-minutes= : Allowed gap between the ledger and requisition refresh times (default: config)}
                             {--json : Output raw JSON instead of a table}';
 
@@ -43,7 +43,12 @@ class LedgerStatus extends Command
 
     public function handle(): int
     {
-        $maxAge = (int) $this->option('max-age-hours');
+        // Default from CONFIG, not a literal here. The two requisition detail
+        // pages surface staleness in their context strip and must call it stale
+        // at exactly the same age — a page that reassures a user while this
+        // command is alerting is worse than either signal alone.
+        $maxAge = (int) ($this->option('max-age-hours')
+            ?: config('ledger.requisition.max_age_hours'));
         $maxDrift = (int) ($this->option('max-drift-minutes')
             ?: config('ledger.requisition.max_run_drift_minutes'));
 

@@ -81,9 +81,16 @@ trait DerivesRequisitionDetail
      * Totals over the WHOLE filtered set, before pagination. A totals row that
      * summed only the visible page would look authoritative and be wrong.
      *
-     * `requisitions` counts DISTINCT requisition numbers, not rows: a
-     * requisition with nine lines is one requisition, and a card that said
-     * otherwise would disagree with anything finance counts by hand.
+     * `requisitions` counts DISTINCT requisitions, not rows: a requisition with
+     * nine lines is one requisition, and a card that said otherwise would
+     * disagree with anything finance counts by hand.
+     *
+     * It is keyed on (FinancialYear, RequisitionNumber), NOT the number alone,
+     * because requisition numbers RECUR across fiscal years. With one year
+     * selected the two are identical; with All selected — the default since
+     * 2026-10-01 — counting the number alone silently merges a FY2019 and a
+     * FY2024 requisition. Measured 2026-10-01 over the eligible years: 23,959
+     * distinct numbers against 24,065 distinct pairs, an undercount of 106.
      *
      * @param  Collection<int,array<string,mixed>>  $filtered
      * @return array<string,mixed>
@@ -94,7 +101,11 @@ trait DerivesRequisitionDetail
             'committed' => round((float) $filtered->sum('ExtendedCost'), 2),
             'quantity' => round((float) $filtered->sum('Quantity'), 4),
             'lines' => $filtered->count(),
-            'requisitions' => $filtered->pluck('RequisitionNumber')->filter()->unique()->count(),
+            'requisitions' => $filtered
+                ->filter(fn ($r) => ($r['RequisitionNumber'] ?? '') !== '')
+                ->map(fn ($r) => ($r['FinancialYear'] ?? '').'|'.$r['RequisitionNumber'])
+                ->unique()
+                ->count(),
             'vendors' => $filtered->pluck('VendorName')->filter()->unique()->count(),
             'accounts' => $filtered->pluck('AccountNumber')->filter()->unique()->count(),
             'largest' => $this->largestRequisitionLine($filtered),

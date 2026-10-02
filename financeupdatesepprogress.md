@@ -15,7 +15,7 @@ change). Read this before believing any status claim elsewhere, including the pl
 | # | Workstream | State |
 |---|---|---|
 | 1 | Parity source built and proven against the Access query | ✅ **DONE — GATE 1 PASSED**, all 13 FYs, 0 differences |
-| 2 | Fiscal-year control on Encumbered / Routing Details | ✅ DONE |
+| 2 | Fiscal-year control on Encumbered / Routing Details | ✅ DONE (committed `79eef8e`). **🆕 SUPERSEDED 2026-10-01 — the select is now OPTIONAL, defaulting to All Fiscal Years. See the entry at the foot of this file and `routingupdateprogress.md`** |
 | 3 | Knock-on fixes the parity change forces (`PartiallyReceived`, ordering tiebreak) | ✅ DONE |
 | 4 | Tests updated + new offline coverage for the sign change | ✅ DONE — 199 passed / 6 skipped / 0 failed |
 | 5 | `CLAUDE.md` stale access facts + how to run the suite | ✅ DONE |
@@ -482,3 +482,66 @@ user total with an explicit warning, and the figures are:
 Both deltas are 64,550.00 because the whole difference sits on that one account — which is precisely
 why the substitution keeps happening. **When correcting a figure in a runbook, grep for it: it is
 rarely stated once.**
+
+
+---
+
+## 2026-10-01 — fiscal year became an OPTIONAL filter on the two drill-downs
+
+A follow-on change to workstream 2, planned in `routingupdate.md` (rev 7) and recorded in
+**`routingupdateprogress.md`**, which is the status authority for it. Summarised here because this
+file is the project's status record and workstream 2's row above would otherwise read as finished.
+
+**What changed.** Encumbered Details and Routing Details now **open on All Fiscal Years** — every
+year this route's detail shares with the ledger (11 for Encumbered, 3 for Routing on `FFIGUERA1`).
+Choosing a year is an ordinary filter: it counts in the badge, "Clear all" returns it to All, and
+`fy` leaves the URL when All is selected. A read-only gold period chip beside the title states the
+scope in words. **No hero, no year rail, no prev/next stepper, no page-level arrow-key year
+stepping** — none of that came back.
+
+**Implemented and verified locally; not committed, not deployed.**
+
+**Measured 2026-10-01** (local SQL Server, `FFIGUERA1`, via `sql/Phase3AllYearsReconciliation.sql`):
+
+| Fact | Value |
+|---|---|
+| Eligible years — Encumbered / Routing | **11** / **3** (ledger boundary is 13 — the three are not the same thing) |
+| Withheld years, named on the page | FY2011, FY2012, FY2013 |
+| All-years rows, Encumbered | **416** |
+| Reconciliation, Encumbered | detail **TTD 111,089,421.36** = `SUM(Approved)` — **diff 0.00** |
+| Reconciliation, Routing | **TTD 241,553.20** = `SUM(Routing)` — **diff 0.00** |
+| Sort-key uniqueness (5 keys) and `DuplicateGrainRows`' key (4) | **no tied rows** in either |
+| Cross-year requisition undercount for this user | **0** — which is exactly why it is covered by a test and not an assumption (worst case measured 106 of 24,065) |
+
+**Test results, all run with `SQLSRV_HOST=127.0.0.1`:**
+
+| Suite | Result |
+|---|---|
+| `RequisitionScopeDecisionTest` (new, **offline**) | **16 passed**, 40 assertions |
+| `DerivesRequisitionDetailTest` (**offline**) | **18 passed**, 51 assertions |
+| `RequisitionScopeCeilingTest` (new, SQL-backed, both routes) | **30 passed, 0 skipped**, 194 assertions |
+| `RequisitionDetailTest` | **49 passed, 3 skipped**, 502 assertions |
+| `CsvExportTest` | **26 passed, 1 skipped**, 1,281 assertions |
+| `npm run test:js` (new, `node --test`) | **5 passed** |
+
+Every skip is a legitimate premise guard, not an unreachable database: two are "fewer than two
+departments" (`FFIGUERA1` sees one, which CLAUDE.md documents as the current and permanent access
+state), one is "no unsummarised years" on Routing, and one is the pre-existing one-department guard
+in `CsvExportTest`.
+
+**Capacity, since the all-years default removed the one-year bound on the read.** The read is now
+bounded by `FINANCE_REQUISITION_ROW_CEILING` (default 25,000) via a `LIMIT ceiling + 1` fetch, and
+**refuses rather than truncating** — a CSV holding 25,000 of 93,336 rows reads as complete. The
+ceiling is a **usability** limit, not a memory one: production `memory_limit` is 4096M on a shared
+`php.ini` (so the figure applies to Apache too), which would allow ~388,000 rows, but 93,336 rows
+is a ~5.1 s response and 3,734 pages of 25. The refusal is unreachable for every real user today.
+
+**Still outstanding — carried from `routingupdate.md` §12, none of them code in this change:**
+
+| # | Item | Blocking? |
+|---|---|---|
+| 1 | **A named owner for the capacity log.** The `row ceiling` / `working set is large` warnings land in `storage/logs` and nobody is watching it | 🟠 non-blocking, but the guard is unobserved without it |
+| 2 | **Monitoring** — no Database Mail, no health-check task. The project's largest open item, open since 2026-08-26 | 🟠 non-blocking here |
+| 3 | **`DuplicateGrainRows` is recorded every refresh and nothing acts on it.** The durable fix is one more condition in `ledger:status`, which already exits non-zero for staleness and run-drift. **Not implemented** — `ledger:status` is outside the plan's file list | 🟠 non-blocking at 0 |
+| 4 | **SQL-pushdown refactor** — the remedy if a single fiscal year ever exceeds the ceiling, or if categorical filters must be able to rescue a scope. `export.md`'s rejection of it rested on a 3,408-row premise this change raises to 93,336, so it is re-opened rather than left standing | ⚪ deferred, triggered |
+| 5 | **The browser checks** — step 5.7 of `finance_sep_update_deployment.md`. The PHP suite verifies the server contract; it cannot see rendered Vue (there is no Inertia SSR), so "no TTD 0 on a refusal" is a manual check by construction | 🟠 before release |

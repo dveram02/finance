@@ -226,6 +226,50 @@ class DerivesRequisitionDetailTest extends TestCase
         $this->assertSame(2, $totals['requisitions']);
     }
 
+    /**
+     * Requisition numbers RECUR across fiscal years, so the count is keyed on
+     * (FinancialYear, RequisitionNumber), not the number alone.
+     *
+     * This became reachable when the fiscal year became an OPTIONAL filter on
+     * the two detail pages (2026-10-01): with All selected, counting the number
+     * alone silently merges a FY2019 and a FY2024 requisition into one.
+     * Measured over the eligible years that day, 23,959 distinct numbers
+     * against 24,065 distinct pairs — an undercount of 106.
+     */
+    public function test_requisitions_are_keyed_on_year_and_number_not_number_alone(): void
+    {
+        $totals = $this->requisitionTotals($this->shaped([
+            $this->detailRow(['FinancialYear' => '2024', 'RequisitionNumber' => 'REQ0001']),
+            $this->detailRow(['FinancialYear' => '2019', 'RequisitionNumber' => 'REQ0001']),
+        ]));
+
+        $this->assertSame(2, $totals['requisitions'],
+            'The same number in two fiscal years is two requisitions.');
+
+        // The single-year case is unchanged — which is what keeps a selected-year
+        // view identical to what it reported before the change.
+        $sameYear = $this->requisitionTotals($this->shaped([
+            $this->detailRow(['FinancialYear' => '2026', 'RequisitionNumber' => 'REQ0001', 'LineNbr' => 1]),
+            $this->detailRow(['FinancialYear' => '2026', 'RequisitionNumber' => 'REQ0001', 'LineNbr' => 2]),
+        ]));
+
+        $this->assertSame(1, $sameYear['requisitions']);
+    }
+
+    public function test_a_blank_requisition_number_is_not_counted(): void
+    {
+        // Guarding the key change: ''.'|'.'' is a non-empty string, so a naive
+        // unique() over the composite key would count blanks as a requisition.
+        $totals = $this->requisitionTotals($this->shaped([
+            $this->detailRow(['RequisitionNumber' => 'REQ0001']),
+            $this->detailRow(['RequisitionNumber' => '']),
+            $this->detailRow(['RequisitionNumber' => null]),
+        ]));
+
+        $this->assertSame(3, $totals['lines']);
+        $this->assertSame(1, $totals['requisitions']);
+    }
+
     public function test_vendor_and_account_counts_ignore_blanks(): void
     {
         $totals = $this->requisitionTotals($this->shaped([

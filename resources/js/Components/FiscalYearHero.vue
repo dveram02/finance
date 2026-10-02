@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { fiscalYearSpan as fySpan } from '@/fiscalYear'
 
 /**
  * The fiscal-year navigator that heads every ledger page. Extracted so the
@@ -23,13 +24,11 @@ const isCurrentFiscalYear = computed(() =>
     String(props.activeFiscalYear) === String(props.currentFiscalYear)
 )
 
-// Fiscal year N runs Oct (N-1) → Sep N.
-const fiscalYearSpan = computed(() => {
-    const fy = Number(props.activeFiscalYear)
-    if (!fy) return ''
-
-    return `Oct ${fy - 1} – Sep ${fy}`
-})
+// Fiscal year N runs Oct (N-1) → Sep N. The rule lives in @/fiscalYear because
+// the two requisition detail pages' period chip states the same span and had no
+// hero to take it from — two copies of an Oct→Sep derivation is how they drift.
+// The template is unchanged, so the four pages using this hero are untouched.
+const fiscalYearSpan = computed(() => fySpan(props.activeFiscalYear))
 
 const select = (fy) => {
     if (fy === null || fy === undefined) return

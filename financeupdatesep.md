@@ -7,6 +7,26 @@
 >
 > Written 2026-09-29, measured against production data. Sibling records: `financesqlupdate.md`,
 > `financesqlupdatep2.md`, `financesqlupdatep3.md`, `updateviews.md`, `export.md`.
+>
+> ### 🆕 2026-10-01 — the fiscal-year control changed again, and this document predates it
+>
+> This document's workstream 2 took the fiscal year out of the hero and made it a **required**
+> select on Encumbered Details and Routing Details. **It is now OPTIONAL and defaults to All
+> Fiscal Years.** Plan and rationale: `routingupdate.md` (rev 7). Status, measurements and what
+> is left: `routingupdateprogress.md`.
+>
+> Four things that document settles, which matter here because they interact with parity:
+>
+> 1. **"All" is enforced in the QUERY**, bounded to the route's eligible years (detail ∩ ledger).
+>    Skipping the bound leaked 49 FY2011–13 rows / TTD 75,829.66, which have no summary row to
+>    reconcile against.
+> 2. **The all-years total still ties to the summary** over that eligible set — verified
+>    2026-10-01, diff **0.00** on both routes.
+> 3. **The row ceiling is new.** The all-years default removed the one-year bound on the read, so
+>    the read is bounded by configuration instead, and **refuses rather than truncating**.
+> 4. **Ordering gained `FinancialYear DESC` in front** and `PONumber` behind. This document's own
+>    "ordering tiebreak" work (workstream 3) is what the appended key completes; it moves no row
+>    today, because the four keys before it have zero tied groups in 108,435.
 
 ---
 

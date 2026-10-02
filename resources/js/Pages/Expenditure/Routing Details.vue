@@ -23,6 +23,10 @@ defineProps({
     currentFiscalYear: [Number, String],
     snapshot: Object,
     unsummarisedYears: Array,
+    // The scope guard. Forwarded, not interpreted — RequisitionDetailView owns
+    // every decision about what a refusal suppresses.
+    scopeRefused: Boolean,
+    scopeRefusedMessage: String,
 })
 </script>
 
@@ -49,5 +53,7 @@ defineProps({
         :current-fiscal-year="currentFiscalYear"
         :snapshot="snapshot"
         :unsummarised-years="unsummarisedYears"
+        :scope-refused="scopeRefused"
+        :scope-refused-message="scopeRefusedMessage"
     />
 </template>

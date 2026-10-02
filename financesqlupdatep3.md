@@ -195,6 +195,22 @@ the department mapping rather than introducing a rule.
 
 # As built — 2026-08-27
 
+> ### ⚠️ Dated supersession — 2026-10-01, four passages
+>
+> This section is a declared authority, and CLAUDE.md repeats that — so where it is now wrong it
+> is wrong loudly. `routingupdate.md` made fiscal year an **optional** filter on both pages.
+>
+> | Below | Correction |
+> |---|---|
+> | the **fiscal-year hero** and its year rail | **Gone**, committed `79eef8e`. The year is a select in the Filters card, and since 2026-10-01 an OPTIONAL one defaulting to **All Fiscal Years**. A read-only gold period chip beside the `<h1>` states the scope. Do not restore the hero |
+> | the withheld-years line sits "under the fiscal-year hero" | It sits under the fiscal-year **select** |
+> | `Quantity` is `ActBalance` "floored at zero" | **SIGNED, not floored** — the Access-parity change removed that floor, so an over-received line is negative. `ExtendedCost` likewise |
+> | the Requisitions KPI counts "distinct requisition numbers" | Keyed on **(FinancialYear, RequisitionNumber)**. Numbers recur across years, and with All selected the number alone merges a FY2019 and a FY2024 requisition |
+>
+> Also changed, and not contradicted anywhere below because it did not exist: the all-years scope
+> is bounded in the QUERY to the route's eligible years, and the read is bounded by a **row
+> ceiling** that refuses rather than truncates. See `routingupdate.md` §4 and §6.
+
 **Implemented; all tests passing against real data on dev.** This section WINS wherever it and the
 design above disagree — the design was written before the code existed.
 
@@ -219,7 +235,7 @@ column it drills into.
 
 `RequisitionDetailController::availableYears()` reads two year lists — the user's requisition years
 and the user's ledger years — and returns their intersection as `years` plus the difference as
-`unsummarisedYears`. The page renders a line under the fiscal-year hero: *"FY 2010, 2011, 2012,
+`unsummarisedYears`. The page renders a line under the fiscal-year **select** (it was the hero when this was written — see the supersession note above): *"FY 2010, 2011, 2012,
 2013 have requisition detail but no budget ledger, so they are not offered here."*
 
 Bounding alone would have been indistinguishable from lost data; naming them costs one prop.
@@ -324,7 +340,7 @@ already has to keep two in step.
   which the projection does not have. `Cluster` and `Institution` were reachable only as filter
   dropdowns, so a user could filter by an institution the table never named.
 * **`OrderQuantity` and `QtyShipped` survive as a tooltip on the Quantity cell**, not as columns.
-  `Quantity` is `ActBalance` — ordered less received, floored at zero — so a reader comparing it
+  `Quantity` is `ActBalance` — ordered less received, **signed and NOT floored at zero** since the Access-parity change — so a reader comparing it
   against a purchase order needs to know why the two differ, but the projection has no place for
   them. A partially received line still tints its quantity.
 * **Only Requisition and PO are frozen.** `ExtendedCost` is the eleventh of seventeen columns, with
@@ -334,7 +350,7 @@ already has to keep two in step.
   frozen with the rest of the table, so the total stays with the reader.
 * Filters: cluster (cascading into institution), institution, department, account, vendor, status.
   Status is offered only within the page's own set and only for values present in the active FY.
-* The Requisitions KPI counts **distinct requisition numbers**, not lines — a nine-line requisition
+* The Requisitions KPI counts **distinct requisitions**, not lines — a nine-line requisition
   is one requisition, and a card that said otherwise would disagree with anything finance counts by
   hand.
 

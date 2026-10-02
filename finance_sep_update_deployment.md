@@ -623,12 +623,24 @@ will correctly see empty pages).
 | Budget Allocations | renders; the 11 split accounts appear **twice** in FY2026 |
 | Monthly Expenditure | renders; totals row matches the sum over all pages |
 | Variance | renders; Excess / Balance up by ~850,193 in total |
-| **Encumbered Details** | **no year banner, no prev/next**; required **Fiscal Year** select is the first filter; negative Extended Cost present; withheld years named under the select |
-| **Routing Details** | same, and no negatives (RT/HD/PN carry no shipments) |
+| **Encumbered Details** | **no year banner, no prev/next**; the **Fiscal Year** select is the first filter and is **OPTIONAL, opening on "All Fiscal Years"**; the gold period chip beside the title reads **"All available fiscal years"**; no `fy` in the URL and **no filter badge**; negative Extended Cost present; withheld years named under the select |
+| **Routing Details** | same, and no negatives (RT/HD/PN carry no shipments). Note it offers **noticeably fewer years** than Encumbered — 3 against 11 when measured — which is correct: the eligible set is route-specific |
 
 Also: arrow keys scroll table columns but **no longer step years** on those two pages, while the four
-banner pages still step years. "Clear all" keeps the selected year. Changing the year auto-applies and
-updates the URL.
+banner pages still step years. Changing the year auto-applies and updates the URL.
+
+⚠️ **Two rows of this table were inverted until 2026-10-01**, and someone following them would have
+logged a correct build as a failure. Fiscal year became an **optional** filter on these two pages
+(`routingupdate.md`), so:
+
+| Was | Now |
+|---|---|
+| "**required** Fiscal Year select" | optional, defaulting to All Fiscal Years |
+| "'Clear all' **keeps** the selected year" | **"Clear all" returns the year to All**, like every other filter — and a chosen year **counts in the filter badge** |
+
+Select a year and confirm the chip reads `FY 2026 · Oct 2025 – Sep 2026` with the badge at 1, then
+"Clear all" and confirm it returns to "All available fiscal years" with no badge and no `fy` in the
+URL. **No year shows "Current"** — the current FY is 2027 and the newest selectable year is 2026.
 
 ### Step 5.6 [WEB] [VERIFY] Exports
 
@@ -637,6 +649,46 @@ item from `export.md` §11.
 
 **PASS:** each downloads; negative Extended Cost appears as a raw negative decimal (e.g. `-48000.00`),
 never text, never `-0.00`; `?page=1` and `?page=2` produce byte-identical bodies.
+
+🆕 **The two requisition files now have two filename shapes**, because the year is optional:
+
+| Scope | Filename | Contents |
+|---|---|---|
+| All Fiscal Years (the default) | `encumbered-details-<date>-<time>.csv` — **no `fy` segment** | every eligible year; its distinct `Financial Year` set must equal the dropdown's |
+| A selected year | `encumbered-details-fy2026-<date>-<time>.csv` | that year only |
+
+A missing `fy` segment is correct, not a bug — a filename must not claim a scope the file does not
+have.
+
+### Step 5.7 [WEB] [VERIFY] The row-ceiling guard
+
+New with `routingupdate.md`. The all-years default means the read is bounded by
+`FINANCE_REQUISITION_ROW_CEILING` (default 25,000) rather than by one fiscal year. It is unreachable
+with real data today — 416 rows for the only mapped user — so it is verified by lowering the ceiling.
+
+```
+# In .env on the WEB server, then: php artisan config:clear
+FINANCE_REQUISITION_ROW_CEILING=10
+```
+
+⚠️ **Walk ALL FOUR branches.** They produce different URLs and different messages, and testing only
+one is how a `?fy=0` redirect bug survived two review rounds.
+
+| Start at | Expect |
+|---|---|
+| `/encumbered-details` (no `fy`) | **302** → `?fy=<newest>`; the flash names that year as **selected** (not "shown"), and contains a real year, never a literal `:year`; the page then shows the amber refusal block |
+| `/encumbered-details?fy=<newest>` | **no redirect**; refusal block; the Fiscal Year select is still **enabled and populated** |
+| `/encumbered-details/export` | **302** → `?fy=<newest>`; flash begins **"No file was created…"**; **nothing downloads** |
+| `/encumbered-details/export?fy=<newest>` | **302** → `?fy=<newest>` — **the same year, never `fy=0`**; the single-year flash; nothing downloads |
+
+**PASS, on the refusal page:** **no "TTD 0" anywhere** and the KPI grid is **absent** rather than
+zeroed; **no** "No requisition lines found"; the **export button is absent** rather than a disabled
+control blaming the data; the **other six selects are disabled** with the explanatory note; the
+totals row and pagination are **absent**. An oversized result must never read as an empty one.
+
+**Then restore the ceiling** (remove the line or set it back to 25000) and `php artisan config:clear`
+again. Note an `.env` edit alone does nothing under `config:cache` — the config must be rebuilt and
+the FastCGI workers recycled.
 
 ---
 

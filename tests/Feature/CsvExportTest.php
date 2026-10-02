@@ -7,6 +7,7 @@ use App\Models\FinanceRequisition;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Feature\Concerns\UsesBudgetData;
 use Tests\Feature\Concerns\UsesLedgerData;
 use Tests\Feature\Concerns\UsesRequisitionData;
@@ -330,6 +331,125 @@ class CsvExportTest extends TestCase
         if (! $exercised) {
             $this->markTestSkipped('This user has no requisition lines on either status set.');
         }
+    }
+
+    // =========================================================================
+    // Fiscal year is OPTIONAL on the two requisition exports (2026-10-01)
+    //
+    // Parameterised over BOTH routes: Encumbered has 11 eligible years to
+    // Routing's 3, so a case written against one proves little about the other.
+    // =========================================================================
+
+    /** @return array<string,array{0:string,1:string,2:string}> */
+    public static function requisitionPages(): array
+    {
+        return [
+            'encumbered' => ['/encumbered-details', '/encumbered-details/export', 'encumbered-details'],
+            'routing' => ['/routing-details', '/routing-details/export', 'routing-details'],
+        ];
+    }
+
+    /** The props of one requisition page, for the independent half of a check. */
+    private function requisitionProps(User $user, string $page, array $query = []): array
+    {
+        return $this->actingAs($user)
+            ->withoutMiddleware(EnsureUserIsActive::class)
+            ->get($page.($query ? '?'.http_build_query($query) : ''))
+            ->viewData('page')['props'];
+    }
+
+    #[DataProvider('requisitionPages')]
+    public function test_an_all_years_requisition_filename_omits_the_fy_segment(string $page, string $url, string $slug): void
+    {
+        // csvFilename() drops the segment on a null year, so the filename does
+        // not claim a scope the file does not have. StreamsCsv is untouched —
+        // it already handled ?int.
+        $user = $this->requisitionUser();
+
+        $response = $this->download($user, $url);
+
+        if ($response->isRedirect()) {
+            $this->markTestSkipped("No rows on {$page} for {$user->username}.");
+        }
+
+        $this->assertMatchesRegularExpression(
+            '/attachment; filename="?'.preg_quote($slug, '/').'-\d{8}-\d{6}\.csv"?/',
+            (string) $response->headers->get('Content-Disposition'),
+        );
+    }
+
+    #[DataProvider('requisitionPages')]
+    public function test_a_selected_year_is_named_in_the_requisition_filename(string $page, string $url, string $slug): void
+    {
+        $user = $this->requisitionUser();
+        $props = $this->requisitionProps($user, $page);
+
+        if ($props['years'] === []) {
+            $this->markTestSkipped("No eligible fiscal years on {$page} for {$user->username}.");
+        }
+
+        $response = $this->download($user, $url, ['fy' => (string) $props['years'][0]]);
+
+        if ($response->isRedirect()) {
+            $this->markTestSkipped("No rows in that year on {$page}.");
+        }
+
+        $this->assertMatchesRegularExpression(
+            '/attachment; filename="?'.preg_quote($slug, '/').'-fy\d{4}-\d{8}-\d{6}\.csv"?/',
+            (string) $response->headers->get('Content-Disposition'),
+        );
+    }
+
+    #[DataProvider('requisitionPages')]
+    public function test_an_unusable_year_is_refused_by_the_requisition_export(string $page, string $url, string $slug): void
+    {
+        // `fy` goes through validFilter() now, so a NON-EMPTY invalid value is
+        // recorded in droppedFilters — which the screen ignores and the export
+        // refuses on, exactly like a stale department. Loading the PAGE at
+        // ?fy=9999 shows All with no warning; requesting the export URL
+        // directly is refused. Two different behaviours, easily conflated.
+        $response = $this->download($this->requisitionUser(), $url, ['fy' => '9999']);
+
+        $response->assertRedirect();
+        $this->assertNotSame('text/csv; charset=UTF-8', $response->headers->get('Content-Type'));
+        $response->assertSessionHas('warning');
+    }
+
+    #[DataProvider('requisitionPages')]
+    public function test_the_all_years_file_covers_exactly_the_eligible_years(string $page, string $url, string $slug): void
+    {
+        // EQUALITY, not "more than one year". That is what makes this
+        // meaningful for Routing's three years, and it is the only check here
+        // that inspects every exported row rather than page 1 — a year present
+        // in the file but not in the dropdown would be a row with no summary to
+        // reconcile against (the R1-A leak), and a missing year would be data
+        // silently dropped.
+        $user = $this->requisitionUser();
+        $props = $this->requisitionProps($user, $page);
+
+        $response = $this->download($user, $url);
+
+        if ($response->isRedirect()) {
+            $this->markTestSkipped("No rows on {$page} for {$user->username}.");
+        }
+
+        $rows = $this->rowsOf($response);
+        $headings = array_shift($rows);
+        $yearCol = array_search('Financial Year', $headings, true);
+        $this->assertNotFalse($yearCol);
+
+        if ($rows === []) {
+            $this->markTestSkipped("No data rows on {$page}.");
+        }
+
+        $inFile = array_values(array_unique(array_map(fn ($r) => (string) $r[$yearCol], $rows)));
+        $offered = array_map('strval', $props['years']);
+
+        sort($inFile);
+        sort($offered);
+
+        $this->assertSame($offered, $inFile,
+            'The all-years file does not cover exactly the years the dropdown offers.');
     }
 
     // =========================================================================
