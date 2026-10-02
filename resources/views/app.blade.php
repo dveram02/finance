@@ -28,8 +28,17 @@
 
         <!-- Scripts -->
         @routes
-        {{-- @vite(['resources/js/app.js', "resources/js/Pages/{$page['component']}.vue"]) --}}
-        @vite(['resources/css/app.css', 'resources/js/app.js'])
+        {{-- The JS entry alone. resources/js/app.js does `import '../css/app.css'`,
+             so its manifest entry carries the stylesheet in its own `css[]` array
+             and @vite emits the <link> for it — asking for resources/css/app.css
+             here as well downloaded the same Tailwind build twice.
+
+             The per-page `resources/js/Pages/{$page['component']}.vue` entry that
+             used to be here is gone for the same reason the CSS entry is: it was
+             never a declared Vite input, so it resolved in dev and threw in
+             production. Inertia resolves page components through the eager
+             import.meta.glob in app.js; nothing needs to be requested per page. --}}
+        @vite(['resources/js/app.js'])
         @inertiaHead
     </head>
     <body class="font-sans antialiased">
