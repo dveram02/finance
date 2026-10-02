@@ -1,12 +1,12 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
+import FiscalYearHero from '@/Components/FiscalYearHero.vue'
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
 import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 import SnapshotFreshness from '@/Components/SnapshotFreshness.vue'
 import { useTableScroll } from '@/composables/useTableScroll'
-import { fiscalYearSpan } from '@/fiscalYear'
 
 /**
  * The whole of both requisition detail pages.
@@ -193,17 +193,13 @@ const clearFilters = () => {
     applyFilters()
 }
 
-// ── The period chip ─────────────────────────────────────────────────────────
-// Read-only. The year is changed in the Filters card; this only STATES the
-// scope, so an all-years table can never be read as one year's.
+// ── The selected scope ──────────────────────────────────────────────────────
+// Read-only, and only the EMPTY-STATE copy uses it now ("Nothing in FY 2026" vs
+// "Nothing in any fiscal year"). The banner states the scope in the header, and
+// derives its own span and "Current" badge from activeFiscalYear — so the chip's
+// periodSpan and isCurrentFiscalYear were removed with it rather than kept as a
+// second derivation of the same two facts.
 const hasFiscalYear = computed(() => props.activeFiscalYear != null && props.activeFiscalYear !== '')
-const periodSpan = computed(() => fiscalYearSpan(props.activeFiscalYear))
-// `currentFiscalYear` has been passed since Phase 3 and never read — this is
-// its first use. Unreachable today: the current FY is 2027 and the newest
-// selectable year is 2026, so no year shows "Current" until FY2027 data lands.
-const isCurrentFiscalYear = computed(() =>
-    hasFiscalYear.value && String(props.activeFiscalYear) === String(props.currentFiscalYear)
-)
 
 
 // ── Loading state ───────────────────────────────────────────────────────────────
@@ -280,72 +276,64 @@ const formatDate = (value) => {
         </div>
 
         <!-- ════════════════════════════ Page header ══════════════════════════════ -->
+        <!-- Centred text, then the banner below it — the same order the four
+             summary pages use, which is what "consistent with the other views"
+             means structurally. The gold period chip that used to sit beside the
+             <h1> is GONE: the banner states the scope now, and two statements of
+             it invite the two to disagree. -->
         <div class="text-center">
-            <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
-                <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">{{ title }}</h1>
-
-                <!-- READ-ONLY period chip. Gold because it carries fiscal-year
-                     identity (CLAUDE.md's colour rule), NOT because it does
-                     anything: no button, no link, no tabindex, no handler, no
-                     hover state, no pointer cursor. The year is changed in the
-                     Filters card below. It exists so an all-years table can
-                     never be mistaken for a single year's.
-
-                     A bordered "context strip" briefly replaced this (2026-10-02)
-                     and was REMOVED the same day: it read as a fifth KPI card
-                     above four real ones, and the page is already a stack of
-                     cards. The facts it carried are all still on the page — the
-                     scope here, the summary column it drills into in moneyNote
-                     below, and the snapshot state in SnapshotFreshness. Do not
-                     reintroduce a banner in this slot. -->
-                <span class="inline-flex items-center gap-2 rounded-full bg-amber-100 ring-1 ring-amber-300/70
-                             px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800
-                             dark:bg-amber-400/15 dark:ring-amber-300/40 dark:text-amber-200">
-                    <i class="fas fa-calendar-day text-[10px]" aria-hidden="true"></i>
-                    <template v-if="hasFiscalYear">
-                        FY {{ activeFiscalYear }}
-                        <span class="font-normal normal-case tracking-normal">· {{ periodSpan }}</span>
-                        <span v-if="isCurrentFiscalYear" class="inline-flex items-center gap-1.5">
-                            ·
-                            <!-- motion-reduce:animate-none — the pulse is purely
-                                 decorative and some readers are vestibular-sensitive. -->
-                            <span class="relative flex h-1.5 w-1.5" aria-hidden="true">
-                                <span class="absolute inline-flex h-full w-full animate-ping motion-reduce:animate-none rounded-full bg-amber-300 opacity-75"></span>
-                                <span class="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-300"></span>
-                            </span>
-                            Current
-                        </span>
-                    </template>
-                    <!-- "available", not a count. Accurate for N years, for one,
-                         for none, and for an outage where the number is UNKNOWN
-                         rather than zero — "All 0 fiscal years" would assert a
-                         measurement that was never taken, and "All 1 fiscal
-                         years" is ungrammatical. -->
-                    <template v-else>All available fiscal years</template>
-                </span>
-            </div>
-
+            <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">{{ title }}</h1>
             <p class="text-sm text-tx-subtle mt-1">{{ subtitle }}</p>
             <!-- Names the summary column this page drills into ("the summary's
-                 Approved column, net of receipts…"), which is why no separate
-                 field for it is needed. -->
+                 Approved column, net of receipts…"). -->
             <p class="text-xs text-tx-subtle/80 mt-1">{{ moneyNote }}</p>
-            <SnapshotFreshness
-                class="mt-2"
-                :refreshed-at="snapshot?.refreshedAt"
-                :age="snapshot?.age"
-                :age-hours="snapshot?.ageHours"
-                :state="snapshot?.state"
-            />
         </div>
 
-        <!-- No FiscalYearHero here, deliberately. These two pages are drill-downs
-             into a single account line, so the year belongs with the other things
-             that narrow the set — it is an OPTIONAL select in the Filters card
-             below, defaulting to All Fiscal Years, and the gold chip above
-             states whichever scope is in force. The four summary pages keep the
-             hero; do not reintroduce it here, and do not give this page
-             prev/next year controls or page-level arrow-key year stepping. -->
+        <!-- The same banner as the other four pages, DISPLAY-ONLY (2026-10-02).
+             Three earlier attempts at this slot were reverted; what makes this
+             one different is that the hero can now render the all-years state
+             honestly instead of being forced to pick a year numeral:
+
+               `all-years-label` fills the numeral slot with the words "All
+               Years" when no fiscal year is selected, and the line beneath it
+               becomes the span across the ELIGIBLE years — Oct of the earliest
+               year's start to Sep of the latest year's end, derived in
+               @/fiscalYear so it cannot disagree with the single-year span.
+
+               `:controls="false"` strips the prev/next stepper and the year
+               rail. The Filters card below owns the fiscal year — it counts in
+               the filter badge and "Clear all" returns it to All — so a stepper
+               here would be a second control for one value, and "previous" has
+               no meaning from All.
+
+             `fyNav` is deliberately NOT passed, there is no @select handler, and
+             the page still calls useTableScroll with neither onPrevYear nor
+             onNextYear, so arrow keys scroll columns and never step years.
+
+             It reports NO QUANTITY, which is why it renders unchanged through a
+             scope refusal, a source outage and a missing access mapping. Do not
+             put a figure in it. -->
+        <FiscalYearHero
+            :active-fiscal-year="activeFiscalYear"
+            :current-fiscal-year="currentFiscalYear"
+            :years="years"
+            all-years-label="All Years"
+            :controls="false"
+        />
+
+        <!-- The quiet "as at … rebuilt nightly, not live" line was removed from
+             this page on 2026-10-02; the ALARM was not. `faults-only` renders
+             nothing while the snapshot is healthy or unreadable, and the amber
+             strip when it is stale past 36h or the last run aborted. Keeping it
+             matters because the production health-check task has never been
+             registered, so a stopped Agent job is otherwise silent. -->
+        <SnapshotFreshness
+            faults-only
+            :refreshed-at="snapshot?.refreshedAt"
+            :age="snapshot?.age"
+            :age-hours="snapshot?.ageHours"
+            :state="snapshot?.state"
+        />
 
         <!-- ════════════════════════════ KPI cards ════════════════════════════════ -->
         <!-- Everything that reports a QUANTITY is gated on a resolved scope. A

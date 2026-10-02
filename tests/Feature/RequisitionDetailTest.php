@@ -56,11 +56,13 @@ class RequisitionDetailTest extends TestCase
         // uninteresting reason.
         'scopeRefused', 'scopeRefusedMessage',
     ];
-    // No 'fyNav'. These two pages have no fiscal-year banner, rail or prev/next
-    // stepper — the year is an OPTIONAL select in their Filters card, defaulting
-    // to All Fiscal Years — so there is nothing for prev/next to drive. The four
-    // summary pages still pass it, and ResolvesFiscalYear::fiscalYearNav() is
-    // still theirs.
+    // No 'fyNav'. As of 2026-10-02 these two pages DO wear the FiscalYearHero
+    // banner, but display-only: `:controls="false"`, so no year rail and no
+    // prev/next stepper, and `all-years-label` lets it state the all-years scope
+    // without a numeral. The year is an OPTIONAL select in their Filters card,
+    // defaulting to All Fiscal Years, so there is still nothing for prev/next to
+    // drive. The four summary pages pass fyNav and keep the full control, and
+    // ResolvesFiscalYear::fiscalYearNav() is still theirs alone.
 
     /**
      * The row count the detail view holds for this user and status set,
@@ -536,17 +538,29 @@ class RequisitionDetailTest extends TestCase
     }
 
     #[DataProvider('pages')]
-    public function test_the_page_says_when_the_snapshot_was_last_built(string $url, string $component, array $statuses, string $ledgerColumn): void
+    public function test_the_snapshot_state_reaches_the_page_so_a_stale_build_can_alarm(string $url, string $component, array $statuses, string $ledgerColumn): void
     {
-        // Phase 2 traded live data for reconciliation. The trade is only honest
-        // if the page says when the figures are from.
+        // Phase 2 traded live data for reconciliation, and the page used to
+        // carry a quiet "as at … rebuilt nightly, not live" line saying so. That
+        // line was removed on 2026-10-02; SnapshotFreshness is now rendered
+        // `faults-only`, so NOTHING is shown while the snapshot is healthy.
+        //
+        // That makes these props MORE load-bearing, not less: `state` is the
+        // only thing that can still raise the amber strip, and it is the only
+        // signal a user gets at all, because the production health-check task
+        // has never been registered. Assert the whole shape the component reads.
         $this->actingAs($this->requisitionUser())
             ->get($url)
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->has('snapshot.refreshedAt')
                 ->has('snapshot.age')
+                ->has('snapshot.ageHours')
+                ->has('snapshot.state')
                 ->whereNot('snapshot.refreshedAt', null)
+                // The four states are never conflated. A healthy build must not
+                // report itself as one of the two that render amber.
+                ->where('snapshot.state', fn ($state) => in_array($state, ['ok', 'stale', 'failed', 'unknown'], true))
             );
     }
 

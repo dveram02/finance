@@ -40,6 +40,18 @@ const props = defineProps({
     age: { type: String, default: null },
     ageHours: { type: Number, default: null },
     state: { type: String, default: 'unknown' },
+    // Render ONLY the fault states (stale/failed), nothing for ok/unknown.
+    //
+    // The two requisition drill-downs set this (2026-10-02): the quiet "as at …
+    // rebuilt nightly, not live" line was removed from their header, but the
+    // ALARM was kept. Those are different decisions — dropping the quiet line is
+    // cosmetic, while dropping the amber strip would make a stopped nightly
+    // Agent job completely silent, and the production health-check task has
+    // never been registered, so nothing else would notice.
+    //
+    // It is a prop here rather than a v-if in the page so that `isFault` below
+    // stays the ONE definition of which states are faults.
+    faultsOnly: { type: Boolean, default: false },
 })
 
 const exact = computed(() => {
@@ -88,8 +100,13 @@ const isFault = computed(() => props.state === 'stale' || props.state === 'faile
          One quiet centred line under the page header, matching the subtitle and
          money note above it. A bordered strip was tried here on 2026-10-02 and
          removed the same day — it read as a fifth KPI card above four real
-         ones. -->
-    <p v-else class="flex flex-wrap items-center justify-center gap-x-2 text-xs text-tx-subtle"
+         ones.
+
+         SUPPRESSED ENTIRELY by `faultsOnly`, which the two requisition
+         drill-downs set: they show nothing when the snapshot is healthy or
+         unreadable, and only the amber strip above when it is stale or
+         failed. -->
+    <p v-else-if="!faultsOnly" class="flex flex-wrap items-center justify-center gap-x-2 text-xs text-tx-subtle"
         :title="refreshedAt || undefined">
         <i class="fas fa-clock-rotate-left text-[10px]" aria-hidden="true"></i>
         <template v-if="exact">

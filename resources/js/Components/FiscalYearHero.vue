@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { fiscalYearSpan as fySpan } from '@/fiscalYear'
+import { fiscalYearSpan as fySpan, fiscalYearRangeSpan as fyRangeSpan } from '@/fiscalYear'
 
 /**
  * The fiscal-year navigator that heads every ledger page. Extracted so the
@@ -8,27 +8,68 @@ import { fiscalYearSpan as fySpan } from '@/fiscalYear'
  *
  * Owns presentation and the year rail only; the parent decides what changing
  * year means, via the `select` event.
+ *
+ * It heads ALL SIX pages as of 2026-10-02. The two requisition drill-downs take
+ * it in a display-only, all-years-capable form — `:controls="false"` and
+ * `all-years-label="All Years"` — because their fiscal year is an OPTIONAL
+ * filter owned by their Filters card, so a stepper here would be a second
+ * control for it and "previous" has no meaning from All. Both new props DEFAULT
+ * to the old behaviour, so the four summary pages are untouched: `controls` is
+ * true, and with no `allYearsLabel` an absent year still renders "—".
  */
 const props = defineProps({
     activeFiscalYear:  [Number, String],
     currentFiscalYear: [Number, String],
     years:             { type: Array, default: () => [] },
     fyNav:             { type: Object, default: () => ({ prev: null, next: null }) },
+
+    // What to render in place of the numeral when there is NO active year —
+    // the two drill-downs' "All Years". Null means "this page has no all-years
+    // state", which keeps the four summary pages' "—" fallback for a year that
+    // failed to resolve: an outage must not read as a deliberate scope.
+    allYearsLabel: { type: String, default: null },
+    // False strips the prev/next buttons and the year rail, leaving the banner
+    // a read-only statement of scope. The `select` event is then unreachable.
+    controls: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['select'])
 
 const activeYearStr = computed(() => String(props.activeFiscalYear ?? ''))
 
+const hasActiveYear = computed(() =>
+    props.activeFiscalYear != null && props.activeFiscalYear !== ''
+)
+
+// The all-years state is an ABSENT year on a page that has declared a label for
+// it — never an absent year alone, which is also what an outage looks like.
+const isAllYears = computed(() => !hasActiveYear.value && props.allYearsLabel !== null)
+
+// `|| '—'` is the pre-existing fallback and is kept verbatim for the four
+// summary pages, which pass no allYearsLabel.
+const displayYear = computed(() =>
+    isAllYears.value ? props.allYearsLabel : (props.activeFiscalYear || '—')
+)
+
+// hasActiveYear guards it because String(null) === String(null) is true: without
+// the guard an all-years page whose currentFiscalYear was also absent would
+// claim "Current".
 const isCurrentFiscalYear = computed(() =>
-    String(props.activeFiscalYear) === String(props.currentFiscalYear)
+    hasActiveYear.value && String(props.activeFiscalYear) === String(props.currentFiscalYear)
 )
 
 // Fiscal year N runs Oct (N-1) → Sep N. The rule lives in @/fiscalYear because
 // the two requisition detail pages' period chip states the same span and had no
 // hero to take it from — two copies of an Oct→Sep derivation is how they drift.
 // The template is unchanged, so the four pages using this hero are untouched.
-const fiscalYearSpan = computed(() => fySpan(props.activeFiscalYear))
+//
+// Across a SET of years the rule is the same and the endpoints are not: the
+// earliest year starts twelve months before it is named for and the latest ends
+// in September, so FY2014–FY2026 spans Oct 2013 – Sep 2026. A one-year list
+// agrees with the single-year span, so the line cannot contradict itself.
+const fiscalYearSpan = computed(() =>
+    isAllYears.value ? fyRangeSpan(props.years) : fySpan(props.activeFiscalYear)
+)
 
 const select = (fy) => {
     if (fy === null || fy === undefined) return
@@ -98,7 +139,7 @@ defineExpose({ scrollActiveIntoView })
 
             <!-- Stepper: prev · numeral · next -->
             <div class="mt-2 flex items-center justify-center gap-5 sm:gap-8">
-                <button
+                <button v-if="controls"
                     @click="select(fyNav?.prev)" :disabled="!fyNav?.prev"
                     title="Previous fiscal year (←)" aria-label="Previous fiscal year"
                     class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
@@ -108,9 +149,15 @@ defineExpose({ scrollActiveIntoView })
                 <div class="text-center min-w-[7rem] sm:min-w-[9rem]">
                     <div class="relative inline-block leading-none">
                         <transition name="fy" mode="out-in">
+                            <!-- "All Years" is nine characters where a year is
+                                 four, so it steps down a size on small screens
+                                 rather than wrapping mid-word. -->
                             <span :key="activeYearStr"
-                                class="fy-numeral font-display block text-5xl font-bold text-slate-950 tabular-nums dark:text-white">
-                                {{ activeFiscalYear || '—' }}
+                                :class="[
+                                    'fy-numeral font-display block font-bold text-slate-950 tabular-nums dark:text-white',
+                                    isAllYears ? 'text-4xl sm:text-5xl whitespace-nowrap' : 'text-5xl',
+                                ]">
+                                {{ displayYear }}
                             </span>
                         </transition>
                     </div>
@@ -119,7 +166,7 @@ defineExpose({ scrollActiveIntoView })
                     </p>
                 </div>
 
-                <button
+                <button v-if="controls"
                     @click="select(fyNav?.next)" :disabled="!fyNav?.next"
                     title="Next fiscal year (→)" aria-label="Next fiscal year"
                     class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
@@ -128,7 +175,7 @@ defineExpose({ scrollActiveIntoView })
             </div>
 
             <!-- Year rail -->
-            <div v-if="years.length" class="mt-3">
+            <div v-if="controls && years.length" class="mt-3">
                 <div ref="yearRail"
                     role="tablist" aria-label="Select fiscal year"
                     class="year-rail flex items-center justify-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
