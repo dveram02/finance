@@ -5,24 +5,25 @@ import { useTableScroll } from '@/composables/useTableScroll'
  * Shared behaviour for the wide FISCAL-MONTH ledger tables.
  *
  * Covers the parts that only make sense against a 12-month axis: the column
- * crosshair and the per-row heat shading. Scrolling and the context-sensitive
- * arrow keys live in useTableScroll, which the requisition detail tables also
- * use — they are wide and scroll identically but have no month axis, and
- * sharing that core is what stops the two scroll implementations drifting.
+ * crosshair and the per-row heat shading. Scrolling and the arrow keys live in
+ * useTableScroll, which the requisition detail tables also use — they are wide
+ * and scroll identically but have no month axis, and sharing that core is what
+ * stops the two scroll implementations drifting.
  *
  * Column layout stays with each page, because the column sets differ.
+ *
+ * The arrow keys scroll the months and nothing else. They used to step the
+ * fiscal year when the pointer was outside the table, which is why this took
+ * onPrevYear/onNextYear and forwarded them; both were removed 2026-10-02 and
+ * the page no longer passes anything of the kind.
  *
  * @param {object}   options
  * @param {Function} options.months     () => array of month descriptors ({ key })
  * @param {Function} options.rows       () => array of the currently rendered rows
- * @param {Function} options.onPrevYear called when ← should step the fiscal year
- * @param {Function} options.onNextYear called when → should step the fiscal year
  */
-export function useLedgerTable({ months, rows, onPrevYear, onNextYear }) {
+export function useLedgerTable({ months, rows }) {
     const scroll = useTableScroll({
         rowCount: () => rows().length,
-        onPrevYear,
-        onNextYear,
         // One month column is one scroll step, so figures stay aligned under
         // their headings.
         stepSelector: 'thead [data-month-index]',

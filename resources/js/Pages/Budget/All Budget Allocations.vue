@@ -5,7 +5,6 @@ import NoAccessNotice from '@/Components/NoAccessNotice.vue'
 import FiscalYearHero from '@/Components/FiscalYearHero.vue'
 import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
-import { useFiscalYearNav } from '@/composables/useFiscalYearNav'
 
 const props = defineProps({
     // False when the user maps to no department at all — a permanent state that
@@ -42,7 +41,10 @@ const goToFy = (fy) => {
     applyFilters()
 }
 
-useFiscalYearNav({ fyNav: () => props.fyNav, goToFy })
+// Arrow keys do NOT step the fiscal year. A global ← → handler lived here
+// until 2026-10-02 (useFiscalYearNav, now deleted): it renavigated the page
+// from anywhere, which is not something a reader can predict. The year is
+// changed by the hero's stepper and rail, which emit `select`.
 
 // ── Institution cascade ─────────────────────────────────────────────────────────
 const filteredInstitutions = computed(() => {

@@ -96,8 +96,6 @@ const {
 } = useLedgerTable({
     months: () => props.months ?? [],
     rows: () => props.rows?.data ?? [],
-    onPrevYear: () => (props.fyNav?.prev != null ? goToFy(props.fyNav.prev) : false),
-    onNextYear: () => (props.fyNav?.next != null ? goToFy(props.fyNav.next) : false),
 })
 
 // ── Loading state (shown while a filter / FY / page reload is in flight) ─────────
@@ -336,8 +334,9 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                 <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-tx-subtle">
                     Monthly net expenditure · TTD
                 </p>
-                <!-- Tells the user which thing the arrow keys are currently
-                     pointed at, since they do double duty on this page. -->
+                <!-- Says whether the arrows are currently pointed at this
+                     table. They do nothing anywhere else on the page — they
+                     stopped stepping the fiscal year on 2026-10-02. -->
                 <p v-if="canScroll"
                     :class="[
                         'flex items-center gap-1.5 text-[11px] transition-colors',

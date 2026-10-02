@@ -111,8 +111,6 @@ const {
 } = useLedgerTable({
     months: () => props.months ?? [],
     rows: () => props.rows?.data ?? [],
-    onPrevYear: () => (props.fyNav?.prev != null ? goToFy(props.fyNav.prev) : false),
-    onNextYear: () => (props.fyNav?.next != null ? goToFy(props.fyNav.next) : false),
 })
 
 // ── Loading state ───────────────────────────────────────────────────────────────

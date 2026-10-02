@@ -137,11 +137,15 @@ defineExpose({ scrollActiveIntoView })
                 </span>
             </div>
 
-            <!-- Stepper: prev · numeral · next -->
+            <!-- Stepper: prev · numeral · next.
+                 These buttons and the rail below are the ONLY way to change the
+                 year. The tooltips used to read "Previous fiscal year (←)";
+                 arrow-key year stepping was removed on 2026-10-02, so the key
+                 hints came off with it rather than advertising a dead shortcut. -->
             <div class="mt-2 flex items-center justify-center gap-5 sm:gap-8">
                 <button v-if="controls"
                     @click="select(fyNav?.prev)" :disabled="!fyNav?.prev"
-                    title="Previous fiscal year (←)" aria-label="Previous fiscal year"
+                    title="Previous fiscal year" aria-label="Previous fiscal year"
                     class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
                     <i class="fas fa-chevron-left transition-transform group-hover:-translate-x-0.5"></i>
                 </button>
@@ -168,7 +172,7 @@ defineExpose({ scrollActiveIntoView })
 
                 <button v-if="controls"
                     @click="select(fyNav?.next)" :disabled="!fyNav?.next"
-                    title="Next fiscal year (→)" aria-label="Next fiscal year"
+                    title="Next fiscal year" aria-label="Next fiscal year"
                     class="group flex-shrink-0 grid place-items-center h-9 w-9 rounded-full border border-cyan-700/15 bg-white/60 text-cyan-800 backdrop-blur-sm transition hover:border-amber-400/60 hover:text-amber-700 hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed dark:border-white/15 dark:bg-white/5 dark:text-blue-100/80 dark:hover:border-amber-300/50 dark:hover:text-amber-200 dark:hover:bg-white/10 dark:disabled:hover:border-white/15 dark:disabled:hover:text-blue-100/80 dark:disabled:hover:bg-white/5">
                     <i class="fas fa-chevron-right transition-transform group-hover:translate-x-0.5"></i>
                 </button>

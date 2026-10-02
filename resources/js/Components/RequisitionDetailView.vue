@@ -143,14 +143,12 @@ watch(() => props.filters, (applied) => {
 
 // ── Wide-table scrolling and the arrow keys ─────────────────────────────────
 // Arrows scroll the table's columns while the pointer or focus is in it, and do
-// NOTHING otherwise. These two pages deliberately have no page-level fiscal-year
-// stepping: the year is a filter here, not a banner, so there is no rail for an
-// arrow key to walk. `onPrevYear`/`onNextYear` are therefore left unset —
-// useTableScroll guards with `if (step && step() !== false)`, so omitting them
-// leaves the event alone outside the table instead of swallowing it.
-//
-// The four pages that kept the hero still step years with the arrows, via
-// useFiscalYearNav or useLedgerTable. Do not fold the two behaviours together.
+// NOTHING otherwise — on every page in the app, not just these two. Page-level
+// fiscal-year stepping was removed on 2026-10-02, along with useTableScroll's
+// onPrevYear/onNextYear parameters and the useFiscalYearNav composable; the year
+// is changed by a control you can see (the Filters card here, the hero's stepper
+// and rail on the four summary pages). Do not reintroduce a global key handler
+// that renavigates the page.
 const {
     scroller, canScroll, pointerInTable, tableFocused, arrowsScrollTable,
 } = useTableScroll({
@@ -307,8 +305,8 @@ const formatDate = (value) => {
                no meaning from All.
 
              `fyNav` is deliberately NOT passed, there is no @select handler, and
-             the page still calls useTableScroll with neither onPrevYear nor
-             onNextYear, so arrow keys scroll columns and never step years.
+             and arrow keys never step years anywhere in the app as of
+             2026-10-02 — useTableScroll only ever scrolls the table now.
 
              It reports NO QUANTITY, which is why it renders unchanged through a
              scope refusal, a source outage and a missing access mapping. Do not
@@ -604,8 +602,8 @@ const formatDate = (value) => {
                 <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-tx-subtle">
                     {{ moneyLabel }} requisition lines · TTD
                 </p>
-                <!-- Tells the user which thing the arrow keys are currently
-                     pointed at, since they do double duty on this page. -->
+                <!-- Says whether the arrows are currently pointed at this
+                     table. They do nothing anywhere else on the page. -->
                 <p v-if="canScroll"
                     :class="[
                         'flex items-center gap-1.5 text-[11px] transition-colors',

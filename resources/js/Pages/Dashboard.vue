@@ -2,7 +2,6 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { Head, router } from '@inertiajs/vue3'
 import { useDarkMode } from '@/composables/useDarkMode'
-import { useFiscalYearNav } from '@/composables/useFiscalYearNav'
 import {
   Chart as ChartJS,
   Title,
@@ -70,7 +69,10 @@ const goToFy = (fy) => router.get(route('dashboard'), { fy: String(fy) }, {
   replace: true,
 })
 
-useFiscalYearNav({ fyNav: () => props.fyNav, goToFy })
+// Arrow keys do NOT step the fiscal year. A global ← → handler lived here
+// until 2026-10-02 (useFiscalYearNav, now deleted): it renavigated the page
+// from anywhere, which is not something a reader can predict. The year is
+// changed by the hero's stepper and rail, which emit `select`.
 
 // ── Export ────────────────────────────────────────────────────────────────────
 // The active year is the only scope this page has. Guarded like SideBar.vue

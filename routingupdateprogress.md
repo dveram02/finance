@@ -7,6 +7,8 @@
 - **Branch:** `feature/ledger-oversight-update`. **Nothing here is committed.** The user commits and
   merges manually.
 - **State: IMPLEMENTED AND VERIFIED LOCALLY. Not committed, not deployed.**
+- **Addenda:** §6 (2026-10-02, the page header) and **§7 (2026-10-02, the banner restored
+  display-only, plus arrow-key year stepping removed app-wide)**. §7 supersedes §6.2.
 
 **Status vocabulary**, kept precisely because "shipped" was doing too much work:
 
@@ -217,6 +219,10 @@ truncates — the open dropdown still shows each option in full.
 
 ### 6.2 No hero — and no strip either. The header is plain text.
 
+> WARNING: **SUPERSEDED by §7 (2026-10-02, later the same day): the banner WAS put back,
+> display-only.** Kept unedited because its four objections are why the banner is shaped the way
+> it is — see §7.1 for the disposition of each. Do not act on this section.
+
 **The question asked was whether these two pages need a hero section now the
 year band is gone. The answer is no, and twice over.**
 
@@ -323,3 +329,142 @@ state. That is the strip working.
   in `dbo.FinanceRequisitionRefresh` whose newest `Outcome` is not `OK`. The
   logic is covered offline; the rendering is not.
 
+---
+
+## 7 Addendum — 2026-10-02 (later the same day): the banner came back, display-only
+
+**§6.2 above is SUPERSEDED. Read this section instead.** It is kept unedited because its four
+objections are the reason this version of the banner is shaped the way it is — three of them were
+answered rather than overruled, and the fourth stopped existing.
+
+The user asked for it directly: remove the all-years chip and the nightly-refresh line from the
+header, and "put back the all years banner we had initially like the other views — we still show
+fiscal year on the top left of it, but for the actual years, we show something like All Years, and
+then the next line will be relevant fiscal month start and month end".
+
+### 7.1 What §6.2's four objections did next
+
+| §6.2's objection | Disposition |
+|---|---|
+| 1. No honest way to render "All" as a year **numeral**, and no meaning for "previous" from it | **Answered.** `FiscalYearHero` gained `allYearsLabel`, which fills the numeral slot with the *words* "All Years". Nothing has to pick a year, and nothing claims a "previous" |
+| 2. It would put **two controls on one value** | **Answered.** `:controls="false"` strips the prev/next stepper and the year rail. The band is a read-only statement of scope; the Filters card remains the only control |
+| 3. It needs `fyNav` back on both controllers | **Not needed.** `fyNav` is still not passed, there is still no `@select` handler, and no controller changed |
+| 4. On these pages the arrow keys scroll 17 columns, which conflicts with the hero's contract | **Moot.** Arrow-key year stepping was removed from the whole app later the same day (§7.4), so the hero no longer has that contract to conflict with |
+
+The one objection with no technical answer was the look, and that is what sank the *previous*
+attempt (§7.5) — not this one.
+
+### 7.2 The banner
+
+`RequisitionDetailView.vue` now renders the **shared `FiscalYearHero`**, not a copy, in the same
+page position the four summary pages use: centred `<h1>` + subtitle + `moneyNote`, then the band,
+then the KPI grid.
+
+- **`all-years-label="All Years"`** — the numeral slot, when no fiscal year is selected.
+- **The line beneath it is the span across the ELIGIBLE years**, from new
+  `fiscalYearRangeSpan(years)` in `resources/js/fiscalYear.js`.
+- **`:controls="false"`** — no stepper, no rail.
+- **The gold period chip beside the `<h1>` was REMOVED**, and with it `periodSpan` and
+  `isCurrentFiscalYear` in `RequisitionDetailView`: the band derives both, and two statements of one
+  scope invite the two to disagree. `hasFiscalYear` stayed — the table's empty-state copy uses it.
+- **Both new hero props default to the old behaviour**, which is what leaves the four summary pages
+  untouched: `controls` is `true`, and with no `allYearsLabel` an absent year still renders an em
+  dash. `isAllYears` requires an absent year **and** a declared label, because an absent year is
+  also what an outage looks like, and an outage must not read as a deliberate "All Years" scope.
+
+**The span is `Oct <earliest − 1> – Sep <latest>`, and the user's own example was not.** The request
+said "oct 2014 - oct 2026"; FY2014–FY2026 actually spans **Oct 2013 – Sep 2026**, because the
+earliest year starts twelve months before it is named for and the latest ends in September. Taken
+literally the line would have been 12 months late at one end and 13 at the other, and would have
+contradicted the single-year line rendered by the same component. Raised, and the corrected form
+chosen. A one-year list agrees with `fiscalYearSpan()` by construction.
+
+### 7.3 The span tracks the filter, and the year list has GAPS
+
+The band is passed `:years="years"` and the Fiscal Year select renders `v-for="year in years"` —
+**one array**, so the span follows the user's access automatically and no code knows the year list
+ahead of time. Measured 2026-10-02 for `FFIGUERA1`:
+
+| Route | Eligible years | Span |
+|---|---|---|
+| Encumbered | 11 — `2026, 2025, 2024, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014` (**no FY2022, no FY2023**) | Oct 2013 – Sep 2026 |
+| Routing | **3** — `2026, 2021, 2014` | Oct 2013 – Sep 2026 |
+
+So both pages render the identical line while holding 11 and 3 years of data, and on Routing it
+describes a 13-year window covering three years. **This was raised and the decision was to report
+endpoints only** — a trailing "· N fiscal years" count was offered and declined. Do not add a count,
+do not list the years, do not switch format on the size of the set, and **do not read the two pages'
+identical lines as a bug**. (Encumbered's FY2013/2012/2011 are a different thing — *withheld* years
+the detail holds but the ledger does not. They are excluded from both the dropdown and the span, and
+already named under the select by `unsummarisedYears`.)
+
+### 7.4 §6.3 survives, but only its alarm — and arrow keys stopped changing the year
+
+**`SnapshotFreshness` is now rendered `faults-only` on these two pages.** The quiet "as at … rebuilt
+nightly, not live" line is gone; the amber `stale` / `failed` strips are not. §6.3's four-state table
+is unchanged and still correct.
+
+Those are **different decisions and only the first was taken**: the quiet line was cosmetic, while
+the amber strip is the only signal a user gets that the nightly job has stopped — monitoring item #2
+in §5 has been open since 2026-08-26, so nothing else would notice. `faultsOnly` is a **prop on the
+component**, not a `v-if` in the page, so `isFault` stays the one definition of what counts as a
+fault. `snapshot.refreshedAt` / `age` / `ageHours` / `state` are therefore *more* load-bearing now,
+not less — `RequisitionDetailTest::test_the_snapshot_state_reaches_the_page_so_a_stale_build_can_alarm`
+asserts the whole shape, and was renamed from `test_the_page_says_when_the_snapshot_was_last_built`
+because the page no longer says it.
+
+**Separately, on the user's instruction — "the user presses the left or right arrows, the years
+change for the view, i do not want this behaviour" — arrow-key year stepping was removed from EVERY
+page.** It had three independent sources, and leaving any one would have kept the behaviour on two
+pages:
+
+1. `composables/useFiscalYearNav.js` — **deleted**; calls dropped from `Dashboard.vue` and
+   `All Budget Allocations.vue`.
+2. `useTableScroll`'s `onPrevYear` / `onNextYear` params and the year branch of `handleKeydown` —
+   **gone**.
+3. `useLedgerTable` no longer accepts or forwards them; `Monthly Expenditure.vue` and `Variance.vue`
+   no longer pass them.
+
+`useTableScroll` is now the **only** arrow-key listener in the app (the three others are Escape
+handlers for modals and dropdowns). It acts on one condition — pointer or focus inside a table with
+somewhere to scroll — and returns early otherwise, leaving the event to the browser. **The case
+easiest to miss:** the old handler also stepped the year when the pointer was *inside* a table that
+could not scroll (a wide screen where everything fits), because `arrowsScrollTable` is
+`canScroll && (pointerInTable || tableFocused)`. `fyNav` still drives the hero's prev/next
+**buttons** on the four summary pages; only the keyboard path went, and the tooltips lost their
+"(←)" / "(→)" hints so the UI does not advertise a dead shortcut. Nothing server-side changed.
+
+### 7.5 One attempt in between, built and reverted
+
+Between §6.2 and §7.2 a **shared `PageHero` shell** was built: `FiscalYearHero`'s chrome extracted
+into a props-free component with `eyebrow` / `main` / `footnote` slots, the hero rebuilt on it, and
+the drill-downs given the same shell holding their `<h1>`, the chip, `SnapshotFreshness` and
+`moneyNote`. It answered every objection in §6.2 and was **reverted on the look alone** — "lets
+revert i do not like this". `PageHero.vue` was deleted and `FiscalYearHero` still owns its own
+chrome. Counting it, this slot has now been through four attempts; the one that stands is the shared
+component, display-only, with an honest all-years state.
+
+### 7.6 Verification
+
+- **Suite** (`SQLSRV_HOST=127.0.0.1 php artisan test`): **275 passed, 7 skipped, 0 failed, 3,105
+  assertions**. Zero DNS-timeout skips, so the ledger was genuinely exercised. The banner change
+  alone measured **274 passed / 8 skipped / 3,098 assertions** before the arrow-key removal; the skip
+  count moves with the access mapping, not with this code.
+- **`npm run test:js`: 12 passed**, up from 5 — six new cases for `fiscalYearRangeSpan` covering the
+  off-by-one, order-independence (controllers send years newest-first), agreement with
+  `fiscalYearSpan()` on a one-year list, and `''` for an empty or unusable list rather than
+  "Oct NaN".
+- **`npm run build` clean**, and no live references remain to `useFiscalYearNav`, `onPrevYear` or
+  `onNextYear` — only comments recording their removal.
+- **Pint** pass on the one PHP file touched (`tests/Feature/RequisitionDetailTest.php`).
+- **No PHP changed by the banner or the arrow-key removal.** Nine Vue/JS files and one test file.
+
+### 7.7 Still outstanding from this addendum
+
+- **The browser pass, still not done** — now covering: the "All Years" label at its two sizes
+  (`text-4xl sm:text-5xl`, stepped down so nine characters do not wrap mid-word), the span line, the
+  band in dark mode, and **that the four summary pages still render identically** after the hero
+  gained two props. Nothing automated covers any of it: there is no Inertia SSR.
+- **§6.5's `failed`-state item is unchanged** and now matters more, since the amber strip is the only
+  snapshot signal these pages render.
+- Items 1–5 in §5 are untouched by this addendum.

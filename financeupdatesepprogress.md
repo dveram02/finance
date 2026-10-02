@@ -545,3 +545,46 @@ is a ~5.1 s response and 3,734 pages of 25. The refusal is unreachable for every
 | 3 | **`DuplicateGrainRows` is recorded every refresh and nothing acts on it.** The durable fix is one more condition in `ledger:status`, which already exits non-zero for staleness and run-drift. **Not implemented** — `ledger:status` is outside the plan's file list | 🟠 non-blocking at 0 |
 | 4 | **SQL-pushdown refactor** — the remedy if a single fiscal year ever exceeds the ceiling, or if categorical filters must be able to rescue a scope. `export.md`'s rejection of it rested on a 3,408-row premise this change raises to 93,336, so it is re-opened rather than left standing | ⚪ deferred, triggered |
 | 5 | **The browser checks** — step 5.7 of `finance_sep_update_deployment.md`. The PHP suite verifies the server contract; it cannot see rendered Vue (there is no Inertia SSR), so "no TTD 0 on a refusal" is a manual check by construction | 🟠 before release |
+
+---
+
+## 2026-10-02 — the two drill-downs' header, and arrow keys stopped changing the year
+
+**Full detail, measurements and decision history: `routingupdateprogress.md` §7.** Recorded here
+because the fiscal-year control on those two pages is this update's own subject, and §"2026-10-01 —
+fiscal year became an OPTIONAL filter" above now has a sequel.
+
+Four changes, all on the user's instruction, none touching PHP except one test:
+
+1. **The banner came back, display-only.** The same shared `FiscalYearHero` the four summary pages
+   use, passed `:controls="false"` (no stepper, no year rail) and `all-years-label="All Years"`, with
+   the line beneath it the span across the ELIGIBLE years from new `fiscalYearRangeSpan()` in
+   `resources/js/fiscalYear.js`. Both new hero props default to the old behaviour, so the four
+   summary pages are untouched. `fyNav` is still not passed and no controller changed.
+2. **The gold period chip is gone**, and with it `periodSpan` and `isCurrentFiscalYear` in
+   `RequisitionDetailView` — the banner derives both.
+3. **`SnapshotFreshness` is `faults-only`** on these two pages: the quiet "as at … rebuilt nightly,
+   not live" line was removed, the amber `stale` / `failed` strips were NOT. Those are separate
+   decisions and only the first was taken — the alarm is the only user-visible signal that the
+   nightly job has stopped, and monitoring is still unregistered.
+4. 🔴 **Arrow-key fiscal-year stepping was removed from EVERY page**, not just these two. It had
+   three sources: `composables/useFiscalYearNav.js` (**deleted**), `useTableScroll`'s
+   `onPrevYear`/`onNextYear` and the year branch of its `handleKeydown` (**gone**), and
+   `useLedgerTable` forwarding them (**gone**). `useTableScroll` is now the only arrow-key listener
+   in the app and only ever scrolls a table. `fyNav` still drives the hero's prev/next **buttons**;
+   only the keyboard path went, and the tooltips lost their "(←)" / "(→)" hints.
+
+**Verification:** suite with the override **275 passed, 7 skipped, 0 failed, 3,105 assertions**;
+`npm run test:js` **12 passed**; `npm run build` clean; Pint pass on the one PHP file
+(`tests/Feature/RequisitionDetailTest.php`, whose snapshot test was renamed and tightened).
+
+**Committed `b0f42a4`:** the 2026-10-01 all-years work and the first banner iteration.
+**Uncommitted:** everything in the list above. **Still unverified in a browser** — the "All Years"
+label at its two sizes, the span line, dark mode, and that the four summary pages render
+identically.
+
+**One incident worth carrying forward:** `CLAUDE.md` was truncated to zero bytes the same day by a
+scripted edit that opened the file for writing and only then failed to encode its replacement text.
+`CLAUDE.md` and `.claude/` are **gitignored**, so there was nothing to restore from and the file was
+rebuilt by hand. When editing it from a script, encode the whole new text first — or write a temp
+file and rename.

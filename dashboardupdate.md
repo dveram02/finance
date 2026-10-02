@@ -2,6 +2,22 @@
 
 *Revision 6. Changes from r5 are marked **[r6]**; earlier additions keep their **[r2]**–**[r5]** marks. r6 changes only how the work is verified — no implementation step changed.*
 
+> **SUPERSEDED IN PART — 2026-10-02. This is a historical plan; do not implement from it.**
+> Two of its deliverables no longer exist:
+>
+> - **§3's `composables/useFiscalYearNav.js` was DELETED**, and with it every arrow-key fiscal-year
+>   step in the app (`useTableScroll`'s `onPrevYear`/`onNextYear` went at the same time). The year
+>   is changed only from the hero's stepper and rail, or a Filters card select. Steps 203, 246 and
+>   255 below describe wiring that is gone.
+> - **The page names in §Context are stale.** `Department Expenditure` and
+>   `Allocation Line Expenditure` were renamed to `Monthly Expenditure` and `Variance` in
+>   `1cc2a87`, and the old per-period `Monthly Expenditure` page was deleted. There are **six**
+>   ledger-backed pages now, not five.
+>
+> What DID survive is the part this plan existed for: the Dashboard honours `?fy=`, renders the
+> shared `FiscalYearHero`, and the FY navigator stopped existing in four copies.
+> `CLAUDE.md` is the authority.
+
 ## Context
 
 There are **five** ledger-backed pages. Four of them navigate fiscal years: `Budget/All Budget Allocations.vue`, `Expenditure/Monthly Expenditure.vue`, `Expenditure/Department Expenditure.vue` and `Expenditure/Allocation Line Expenditure.vue` all receive `years` / `activeFiscalYear` / `currentFiscalYear` / `fyNav`, render a gold FY stepper + year rail, honour `?fy=`, and step years with ← →.

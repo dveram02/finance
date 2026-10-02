@@ -14,15 +14,19 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
  * columns have grown at the current breakpoint, none of which can be decided
  * up front.
  *
+ * THE ARROW KEYS ONLY EVER SCROLL THIS TABLE. They did once step the fiscal
+ * year when the pointer was outside the table — removed 2026-10-02 on the
+ * user's instruction, and the onPrevYear/onNextYear parameters went with it.
+ * Do not reintroduce either: a global key handler that renavigates the page is
+ * not something a reader can predict from where their pointer happens to be.
+ *
  * @param {object}   options
  * @param {Function} options.rowCount     () => number of rendered rows
- * @param {Function} options.onPrevYear   called when ← should step the fiscal year
- * @param {Function} options.onNextYear   called when → should step the fiscal year
  * @param {string}   [options.stepSelector] a header cell whose width is one
  *        scroll step. Scrolling by a real column width keeps figures aligned
  *        under their headings, rather than the browser's fixed ~40px nudge.
  */
-export function useTableScroll({ rowCount, onPrevYear, onNextYear, stepSelector = 'thead [data-scroll-col]' }) {
+export function useTableScroll({ rowCount, stepSelector = 'thead [data-scroll-col]' }) {
     const scroller = ref(null)
     const canScroll = ref(false)
     let resizeObserver = null
@@ -36,10 +40,10 @@ export function useTableScroll({ rowCount, onPrevYear, onNextYear, stepSelector 
     // the ResizeObserver alone would miss it.
     watch(() => rowCount(), () => nextTick(measureScroll))
 
-    // ── Context-sensitive arrow keys ────────────────────────────────────────
+    // ── Arrow keys: this table, or nothing ──────────────────────────────────
     // Over the table the arrows scroll columns, which is what someone reading a
-    // row wants; anywhere else they step fiscal years. Without the split, trying
-    // to scroll to the last column silently throws you into a different year.
+    // row wants. Anywhere else they are LEFT ALONE — the browser keeps whatever
+    // they would otherwise do.
     //
     // Hover and focus are tracked as state rather than read from
     // document.activeElement, which is not reactive — the page's hint has to
@@ -69,19 +73,13 @@ export function useTableScroll({ rowCount, onPrevYear, onNextYear, stepSelector 
 
         if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
 
-        const direction = e.key === 'ArrowLeft' ? -1 : 1
+        // The ONLY case this composable acts on: the user is in a table that has
+        // somewhere to scroll. Everything else — pointer outside the table, or
+        // inside one that already fits on screen — falls through untouched.
+        if (!arrowsScrollTable.value) return
 
-        // The table wins while the user is in it — but only if there is anything
-        // to scroll, so on a wide screen the arrows still step fiscal years.
-        if (arrowsScrollTable.value) {
-            e.preventDefault()
-            scrollColumns(direction)
-
-            return
-        }
-
-        const step = direction === -1 ? onPrevYear : onNextYear
-        if (step && step() !== false) e.preventDefault()
+        e.preventDefault()
+        scrollColumns(e.key === 'ArrowLeft' ? -1 : 1)
     }
 
     onMounted(() => {

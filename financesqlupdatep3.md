@@ -372,3 +372,22 @@ already has to keep two in step.
   Approved and Routing per account and could deep-link into the matching filtered detail
   (`?fy=…&account=…`). That is the obvious next increment and is deliberately not in this change.
 * **No export**, per open item 4.
+
+---
+
+## Superseded on the page HEADER — 2026-10-02
+
+Everything above about the two pages' header is out of date. The current state is in
+**`routingupdateprogress.md` §7**, which wins:
+
+- The pages now wear the shared **`FiscalYearHero`**, display-only (`:controls="false"` +
+  `all-years-label="All Years"`), with an all-years span line from `fiscalYearRangeSpan()`. There is
+  still no year rail, no prev/next stepper and no `fyNav`.
+- The **read-only gold period chip is gone** — the banner states the scope.
+- **`SnapshotFreshness` renders faults only.** The quiet "as at … rebuilt nightly, not live" line
+  was removed; the amber `stale` / `failed` strips remain.
+- **Arrow keys no longer step the fiscal year anywhere in the app.** `useFiscalYearNav.js` is
+  deleted and `useTableScroll` no longer takes `onPrevYear` / `onNextYear`.
+
+The data layer, the seventeen columns, the cache versioning, the access scoping and the
+reconciliation contract described above are all unchanged.
