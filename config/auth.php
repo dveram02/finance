@@ -107,4 +107,49 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Active-Status Trust Window
+    |--------------------------------------------------------------------------
+    |
+    | How long the `active.user` middleware may trust the local users.is_active
+    | mirror before re-reading vw_WebAppUsers, and how soon it retries after a
+    | failed read.
+    |
+    | The cost is bounded PER USER, not per request and not per session: the
+    | timestamp lives on the users row, so every session and tab that user has
+    | open shares one directory lookup per window.
+    |
+    | Lowered from 300s to 60s on 2026-10-03. Both values are normalised by
+    | App\Support\ActiveCheckWindow, which fails closed in both directions:
+    | 0 does NOT mean "check every request" (that would be a denial of service
+    | against a remote, shared auth server) and a huge value does not mean
+    | "never check". There is deliberately no way to switch the check off.
+    |
+    */
+
+    'active_check' => [
+        'ttl_seconds' => env('ACTIVE_USER_TTL_SECONDS', 60),
+        'outage_retry_seconds' => env('ACTIVE_USER_OUTAGE_RETRY_SECONDS', 15),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Self-Service Directory Password Change
+    |--------------------------------------------------------------------------
+    |
+    | The kill switch for the password-change card on /profile. It writes to
+    | SWRHAExpenseControl.dbo.0006AWebAppControls, a table owned by another
+    | team, so the application login needs a column-level GRANT that does not
+    | exist by default (see sql/GrantPasswordUpdate.sql).
+    |
+    | Defaulting to false lets the code deploy BEFORE the grant is applied: the
+    | route exists, the service refuses, and the card does not render. It is
+    | also the rollback that needs no redeploy — flip it and run
+    | `php artisan config:clear`.
+    |
+    */
+
+    'directory_password_change' => env('DIRECTORY_PASSWORD_CHANGE', false),
+
 ];

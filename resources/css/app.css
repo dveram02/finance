@@ -249,3 +249,26 @@ main::-webkit-scrollbar-thumb:hover {
     outline: 2px solid rgba(251, 191, 36, 0.75);
     outline-offset: -2px;
 }
+
+/* ── Windowed row scrolling ──────────────────────────────────────────────────
+   The frozen thead/tfoot above only engage when THIS container has vertical
+   scroll travel of its own. Without a height cap its box is as tall as the
+   table, scrollTop never leaves 0, and `top: 0` / `bottom: 0` never fire — the
+   sticky rules were inert on the vertical axis until this rule existed.
+
+   max-height, never height: a three-row result and the empty state (a single
+   `py-16` cell) must stay short rather than leave a tall void.
+
+   Gated at the same 1024px as `.ledger-frz` above. Below that the frozen
+   columns are not sticky, so a windowed box would scroll with no fixed anchor
+   on either axis — worse than letting the page scroll.
+
+   Scroll chaining is left at its default: a wheel that reaches the last row
+   continues onto the page, which is what someone reading downwards expects. */
+@media (min-width: 1024px) {
+    .table-scroll {
+        max-height: 70vh;              /* fallback for engines without dvh */
+        max-height: min(70dvh, 46rem);
+        scrollbar-gutter: stable;
+    }
+}

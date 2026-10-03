@@ -1,14 +1,23 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import { useDarkMode } from '@/composables/useDarkMode'
+import PasswordChangeModal from '@/Components/PasswordChangeModal.vue'
 
 const props = defineProps({
   user: { type: Object, required: true },
+  // False when the directory password-change kill switch is off, which is also
+  // how this ships before the database GRANT is applied.
+  canChangePassword: { type: Boolean, default: false },
 })
 
 const { isDark } = useDarkMode()
 const user = computed(() => props.user)
+
+// The form itself lives in the modal, so this page holds nothing but the
+// open/closed flag. The modal restores focus to whatever opened it, so the
+// trigger needs no ref here.
+const showPasswordModal = ref(false)
 
 const getInitials = (name) => {
   if (!name) return '?'
@@ -20,6 +29,19 @@ const getInitials = (name) => {
   <Head title="My Profile" />
 
   <div class="max-w-4xl mx-auto space-y-6">
+
+    <!-- Flash messages. Inline rather than via Components/FlashMessages.vue,
+         which nothing in the app imports and AppLayout does not render. -->
+    <div v-if="$page.props.flash?.success"
+         class="p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3 dark:bg-green-900/20 dark:border-green-800">
+      <i class="fas fa-circle-check text-green-500 mt-0.5"></i>
+      <p class="text-sm text-green-800 dark:text-green-200">{{ $page.props.flash.success }}</p>
+    </div>
+    <div v-if="$page.props.flash?.error"
+         class="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 dark:bg-red-900/20 dark:border-red-800">
+      <i class="fas fa-circle-exclamation text-red-500 mt-0.5"></i>
+      <p class="text-sm text-red-800 dark:text-red-200">{{ $page.props.flash.error }}</p>
+    </div>
 
     <!-- Hero Card -->
     <div class="rounded-2xl overflow-hidden border border-white/60 bg-gradient-to-br from-cyan-50 via-white to-slate-100 shadow-xl shadow-slate-950/10 dark:border-white/10 dark:from-[#0b1625] dark:via-[#0e2040] dark:to-[#0b1625]">
@@ -68,7 +90,7 @@ const getInitials = (name) => {
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
       <!-- Left: Account Information -->
-      <div class="lg:col-span-2">
+      <div class="lg:col-span-2 space-y-6">
         <section class="bg-surface border border-line rounded-xl overflow-hidden shadow-sm">
           <header class="px-6 py-4 bg-surface-2 border-b border-line flex items-center gap-2">
             <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -160,6 +182,33 @@ const getInitials = (name) => {
           </div>
         </section>
 
+        <!-- Security — the only action on this page. Hidden entirely when the
+             directory password-change switch is off, which is also how this
+             ships before the database GRANT is applied. -->
+        <section v-if="canChangePassword" class="bg-surface border border-line rounded-xl overflow-hidden shadow-sm">
+          <header class="px-6 py-4 bg-surface-2 border-b border-line flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                 style="background: rgba(8,145,178,0.12);">
+              <i class="fas fa-key text-xs" style="color: #0891b2;"></i>
+            </div>
+            <h2 class="text-sm font-semibold text-tx-primary">Security</h2>
+          </header>
+          <div class="px-6 py-5 space-y-4">
+            <p class="text-xs text-tx-subtle leading-relaxed">
+              Your password is shared with every SWRHA application that uses this account.
+            </p>
+            <button
+              type="button"
+              @click="showPasswordModal = true"
+              class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white shadow-sm hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 dark:focus:ring-offset-[#0b1625]"
+              style="background: linear-gradient(135deg, #0891b2, #b45309);"
+            >
+              <i class="fas fa-key text-xs"></i>
+              Change Password
+            </button>
+          </div>
+        </section>
+
       </div>
     </div>
 
@@ -172,8 +221,10 @@ const getInitials = (name) => {
         <i class="fas fa-arrow-left text-xs"></i>
         Back to Dashboard
       </Link>
-      <span class="text-[10px] text-tx-subtle font-medium uppercase tracking-wider">Read-only</span>
+      <span class="text-[10px] text-tx-subtle font-medium uppercase tracking-wider">Account details managed by Finance</span>
     </div>
+
+    <PasswordChangeModal :open="showPasswordModal" @close="showPasswordModal = false" />
 
   </div>
 </template>

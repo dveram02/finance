@@ -457,15 +457,44 @@ description); choosing a description narrows the account-number list.
 - An **inactive account is not a credential failure**: the user is authenticated, then immediately
   logged out with "Your account has been deactivated." A wrong password gives the generic failure.
 - The display name comes from `EmployeeName`, falling back to `UserName` when it is blank.
-- There is **no registration, password reset or 2FA** — accounts are managed entirely in the external
-  system.
-- Active status is re-verified against SQL Server **every 5 minutes** while browsing. A SQL Server
+- There is **no registration, forgotten-password link or 2FA** — accounts are managed entirely in
+  the external system. Staff who have forgotten their password still have to ask for it to be
+  reset. Someone who *knows* their password can now change it themselves, on the Profile page.
+- Active status is re-verified against SQL Server **every 60 seconds** while browsing, so an account
+  deactivated by the Finance department loses access within about a minute. A SQL Server
   outage during re-verification never deactivates anyone.
 
 ### Profile (`/profile`)
 
-Read-only. Shows the authenticated user's name, username and employee ID as mirrored locally at
-login. There is no edit form — the source system owns these values.
+Shows the authenticated user's name, username and employee ID as mirrored locally at login. **Those
+three are read-only** — the source system owns them, and anything typed over them would be
+overwritten at the next sign-in.
+
+### Changing your password (`/profile`)
+
+The Profile page has a **Change Password** button, under Account Status on the right. It opens a
+small window that asks for your current password, the new one, and the new one again, and writes
+straight to the staff directory the portal signs you in against. Press Escape, click outside it, or
+use Cancel to close it without changing anything.
+
+- **You must know your current password.** This is a change, not a reset. If you have forgotten it,
+  the Finance department still has to reset it for you.
+- **The new password must be 6 to 64 characters**, and may only contain letters, numbers, spaces and
+  ordinary keyboard symbols. Accented and non-English characters are refused *on purpose*: the
+  account system cannot store them, and a password it cannot store is one you could never sign in
+  with again.
+- **It changes the password for every SWRHA application that uses the same account**, not just the
+  Finance Portal. The portal does not own this directory; it shares it.
+- **You stay signed in on this computer. You are signed out everywhere else** — if you ticked
+  "Remember me" on another machine, that machine will ask for the new password. This is deliberate:
+  if the reason for the change is that someone else learned the old password, leaving those
+  sessions alive would defeat the point.
+- The change is recorded against your name, with the date and time, in the directory's own audit
+  columns. **The password itself is never written to any log.**
+- If the button is not on the page, self-service changes have not been switched on yet — ask the
+  Finance department.
+- Six attempts a minute are allowed. That is there to stop someone guessing at the current-password
+  box from a computer you left unlocked.
 
 ---
 

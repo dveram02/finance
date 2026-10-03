@@ -25,6 +25,18 @@ Route::middleware('guest')->group(function () {
 Route::middleware(['auth', 'active.user'])->group(function () {
     Route::get('/dashboard', [DashboardController::class,        'index'])->name('dashboard');
     Route::get('/profile', [ProfileController::class,           'view'])->name('profile.view');
+
+    // The ONE write in this otherwise read-only portal: a self-service password
+    // change against the SWRHAExpenseControl staff directory. It is a POST
+    // because it changes state, and it is throttled on its OWN named limiter
+    // rather than `throttle:login` — a fumbled password change must not spend
+    // the counter that keeps someone able to sign in. The limiter's response()
+    // callback (AppServiceProvider) returns a redirect, so hitting the limit
+    // flashes an error on /profile instead of throwing the user onto the
+    // full-page 429 error screen and losing the form.
+    Route::post('/profile/password', [ProfileController::class, 'updatePassword'])
+        ->middleware('throttle:password-change')
+        ->name('profile.password.update');
     Route::get('/budget-allocations', [BudgetAllocationController::class,  'index'])->name('budget-allocations.index');
     // Account x fiscal-month grid from dbo.vw_FinanceLedger. It carries the name
     // and the URL of the retired per-period page that read dbo.MonthlyExpenditure;

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Exceptions\DirectoryUnavailableException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use Illuminate\Http\RedirectResponse;
@@ -37,7 +38,20 @@ class AuthenticatedSessionController extends Controller
             'password' => $request->string('password')->toString(),
         ];
 
-        if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+        try {
+            $authenticated = Auth::attempt($credentials, $request->boolean('remember'));
+        } catch (DirectoryUnavailableException) {
+            // An outage is NOT a credential failure. Saying "those credentials
+            // are wrong" to someone whose password is perfectly correct sends
+            // them to get it reset, and on this deployment no monitoring exists,
+            // so this message is the only symptom anyone sees of a dead
+            // directory. The provider has already logged the cause.
+            return redirect()->route('login')
+                ->withInput($request->only('username'))
+                ->with('error', 'The sign-in service is temporarily unavailable. Please try again in a few minutes.');
+        }
+
+        if (! $authenticated) {
             return redirect()->route('login')
                 ->withInput($request->only('username'))
                 ->withErrors(['username' => __('auth.failed')]);

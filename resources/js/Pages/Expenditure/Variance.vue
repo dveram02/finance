@@ -428,7 +428,7 @@ const statusTitle = (row) => {
                 class="table-scroll overflow-x-auto"
                 tabindex="0"
                 role="region"
-                aria-label="Variance table, scrollable horizontally"
+                aria-label="Variance table, scrollable"
                 @mouseenter="pointerInTable = true"
                 @mouseleave="pointerInTable = false; clearHover()"
                 @focusin="tableFocused = true"

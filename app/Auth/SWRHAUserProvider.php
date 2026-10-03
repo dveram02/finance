@@ -2,8 +2,10 @@
 
 namespace App\Auth;
 
+use App\Exceptions\DirectoryUnavailableException;
 use App\Models\GP\SWRHAExpenseControlUser;
 use App\Models\User;
+use App\Support\DirectoryFlag;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Support\Facades\Hash;
@@ -117,6 +119,16 @@ class SWRHAUserProvider implements UserProvider
 
     public function rehashPasswordIfRequired(Authenticatable $user, array $credentials, bool $force = false): void {}
 
+    /**
+     * @throws DirectoryUnavailableException when the directory cannot be READ.
+     *
+     * Deliberately NOT swallowed into a null return. `null` means "no such
+     * user", and reporting an outage that way told anyone with correct
+     * credentials that their password was wrong - sending them to reset a
+     * password that was never broken, during an outage nothing else on this
+     * deployment reports. A missing row and an unreachable server are
+     * different answers and the caller has to be able to tell them apart.
+     */
     private function findSqlServerUser(string $username): ?SWRHAExpenseControlUser
     {
         try {
@@ -124,7 +136,7 @@ class SWRHAUserProvider implements UserProvider
         } catch (\Throwable $e) {
             \Log::error('SWRHAUserProvider SQL Server error', ['message' => $e->getMessage()]);
 
-            return null;
+            throw new DirectoryUnavailableException('The staff directory could not be read.', 0, $e);
         }
     }
 
@@ -169,7 +181,7 @@ class SWRHAUserProvider implements UserProvider
         }
 
         $localUser->name = $this->resolveDisplayName($sqlUser);
-        $localUser->is_active = (bool) $sqlUser->IsActive;
+        $localUser->is_active = DirectoryFlag::isTrue($sqlUser->IsActive);
         $localUser->sql_server_verified_at = now();
         $localUser->save();
 
@@ -185,7 +197,7 @@ class SWRHAUserProvider implements UserProvider
             // drop leading zeros / mangle non-numeric IDs). Trim padding, keep null.
             'employee_id' => $sqlUser->EmployeeID !== null ? trim((string) $sqlUser->EmployeeID) : null,
             'password' => Hash::make(Str::random(40)),
-            'is_active' => (bool) $sqlUser->IsActive,
+            'is_active' => DirectoryFlag::isTrue($sqlUser->IsActive),
             'sql_server_verified_at' => now(),
         ]);
     }

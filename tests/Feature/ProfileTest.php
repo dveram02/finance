@@ -26,6 +26,21 @@ class ProfileTest extends TestCase
             );
     }
 
+    public function test_the_password_card_availability_reaches_the_page(): void
+    {
+        $user = User::factory()->create();
+
+        config(['auth.directory_password_change' => true]);
+        $this->actingAs($user)->get('/profile')->assertInertia(
+            fn (AssertableInertia $page) => $page->where('canChangePassword', true)
+        );
+
+        config(['auth.directory_password_change' => false]);
+        $this->actingAs($user)->get('/profile')->assertInertia(
+            fn (AssertableInertia $page) => $page->where('canChangePassword', false)
+        );
+    }
+
     public function test_profile_page_requires_authentication(): void
     {
         $this->get('/profile')->assertRedirect('/login');

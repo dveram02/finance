@@ -163,6 +163,64 @@ class LoginFlowTest extends TestCase
         $this->assertFalse((bool) User::where('username', 'FFIGUERA1')->value('is_active'));
     }
 
+    /**
+     * The same two cases again with the value production actually stores.
+     *
+     * IsActive is a varchar holding 'TRUE'/'FALSE', and (bool) 'FALSE' is true
+     * in PHP - so until 2026-10-03 a revoked account logged in normally. The
+     * boolean-based cases above are kept for compatibility; these are the ones
+     * that would have caught it.
+     */
+    public function test_the_string_false_blocks_a_first_time_login(): void
+    {
+        $this->directoryUser(['IsActive' => 'FALSE']);
+
+        $response = $this->post('/login', [
+            'username' => 'FFIGUERA1',
+            'password' => self::PASSWORD,
+        ]);
+
+        $this->assertGuest();
+        $response->assertSessionHas('error', 'Your account has been deactivated. Please contact an administrator.');
+        $response->assertSessionHasNoErrors();
+
+        // The mirror is still created - the provider returns the inactive user
+        // deliberately so the controller can give the right message - but it
+        // must be created INACTIVE.
+        $this->assertFalse((bool) User::where('username', 'FFIGUERA1')->value('is_active'));
+    }
+
+    public function test_the_string_false_flips_an_existing_active_mirror(): void
+    {
+        $this->directoryUser(['IsActive' => 'FALSE']);
+        User::factory()->create(['username' => 'FFIGUERA1', 'is_active' => true]);
+
+        $this->post('/login', ['username' => 'FFIGUERA1', 'password' => self::PASSWORD]);
+
+        $this->assertGuest();
+        $this->assertFalse((bool) User::where('username', 'FFIGUERA1')->value('is_active'));
+    }
+
+    public function test_the_string_true_still_permits_login(): void
+    {
+        $this->directoryUser(['IsActive' => 'TRUE']);
+
+        $this->post('/login', ['username' => 'FFIGUERA1', 'password' => self::PASSWORD]);
+
+        $this->assertAuthenticated();
+        $this->assertTrue((bool) User::where('username', 'FFIGUERA1')->value('is_active'));
+    }
+
+    public function test_an_unrecognised_active_flag_fails_closed_at_login(): void
+    {
+        $this->directoryUser(['IsActive' => 'Y']);
+
+        $response = $this->post('/login', ['username' => 'FFIGUERA1', 'password' => self::PASSWORD]);
+
+        $this->assertGuest();
+        $response->assertSessionHas('error', 'Your account has been deactivated. Please contact an administrator.');
+    }
+
     public function test_missing_credentials_are_rejected_by_validation(): void
     {
         $response = $this->post('/login', ['username' => '', 'password' => '']);
@@ -212,17 +270,63 @@ class LoginFlowTest extends TestCase
         $this->assertCount(1, DB::connection('SWRHAExpenseControl')->getQueryLog());
     }
 
-    public function test_a_sql_server_outage_fails_the_login_without_a_500(): void
+    /**
+     * EXPECTATION CHANGED 2026-10-03, deliberately.
+     *
+     * This used to assert `assertSessionHasErrors('username')` — i.e. it locked
+     * in the behaviour that an outage was reported as a credential failure. That
+     * told anyone with a correct password that it was wrong, during an outage
+     * nothing else on this deployment reports, and sent them to get a password
+     * reset that was never needed. The provider now throws
+     * DirectoryUnavailableException and the controller says so honestly.
+     */
+    public function test_a_sql_server_outage_is_reported_as_an_outage_not_a_bad_password(): void
     {
-        // The directory table does not exist on this connection, so every query
-        // throws — the provider must swallow it and report a failed login.
+        // The directory table does not exist on this connection, so every query throws.
         DB::connection('SWRHAExpenseControl')->statement('DROP TABLE vw_WebAppUsers');
 
         $response = $this->post('/login', ['username' => 'FFIGUERA1', 'password' => self::PASSWORD]);
 
         $this->assertGuest();
         $response->assertRedirect(route('login'));
+
+        // Still no 500, and still no 'username' field error blaming the user.
+        $response->assertSessionHasNoErrors();
+        $response->assertSessionHas('error', fn ($message) => str_contains($message, 'temporarily unavailable'));
+
+        // The username survives so they are not retyping it on every retry.
+        $response->assertSessionHasInput('username', 'FFIGUERA1');
+    }
+
+    /**
+     * The other half of the same guard: a genuine bad password must STILL get
+     * the generic credential error. If the outage change had leaked into this
+     * path, every failed login would read as a system fault and real typos
+     * would look like someone else's problem.
+     */
+    public function test_a_wrong_password_still_gets_the_generic_credential_error(): void
+    {
+        $this->directoryUser();
+
+        $response = $this->post('/login', ['username' => 'FFIGUERA1', 'password' => 'wrong']);
+
+        $this->assertGuest();
         $response->assertSessionHasErrors('username');
+        $response->assertSessionMissing('error');
+    }
+
+    public function test_an_unknown_username_during_an_outage_is_also_reported_as_an_outage(): void
+    {
+        // The directory cannot answer "does this user exist?", so the honest
+        // answer is the outage, not "no such user" — and it must not become a
+        // user-enumeration oracle either way.
+        DB::connection('SWRHAExpenseControl')->statement('DROP TABLE vw_WebAppUsers');
+
+        $response = $this->post('/login', ['username' => 'NOBODY9', 'password' => 'whatever']);
+
+        $this->assertGuest();
+        $response->assertSessionHasNoErrors();
+        $response->assertSessionHas('error', fn ($message) => str_contains($message, 'temporarily unavailable'));
     }
 
     // =========================================================================

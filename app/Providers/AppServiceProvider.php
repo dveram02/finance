@@ -22,5 +22,21 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('login', function (Request $request) {
             return Limit::perMinute(5)->by($request->input('username').'|'.$request->ip());
         });
+
+        // Keyed on the authenticated user, NOT on username|ip: this route sits
+        // behind auth, and sharing a counter with 'login' would mean a fumbled
+        // password change locked someone out of signing in.
+        //
+        // The response() callback is not optional. A 429 on an Inertia request
+        // renders Pages/Error.vue (see bootstrap/app.php), which would throw the
+        // user off /profile and discard the form they were filling in.
+        RateLimiter::for('password-change', function (Request $request) {
+            return Limit::perMinute(6)
+                ->by((string) ($request->user()?->getAuthIdentifier() ?? $request->ip()))
+                ->response(fn () => back()->with(
+                    'error',
+                    'Too many password change attempts. Please wait a minute and try again.'
+                ));
+        });
     }
 }

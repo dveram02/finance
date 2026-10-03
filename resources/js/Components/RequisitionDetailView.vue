@@ -621,7 +621,7 @@ const formatDate = (value) => {
                 class="table-scroll overflow-x-auto"
                 tabindex="0"
                 role="region"
-                aria-label="Requisition detail table, scrollable horizontally"
+                aria-label="Requisition detail table, scrollable"
                 @mouseenter="pointerInTable = true"
                 @mouseleave="pointerInTable = false"
                 @focusin="tableFocused = true"

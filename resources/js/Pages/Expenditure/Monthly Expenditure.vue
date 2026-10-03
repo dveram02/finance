@@ -354,7 +354,7 @@ const IDENTITY_CLAMP = { institution: 44, department: 44, account: 52 }
                 class="table-scroll overflow-x-auto"
                 tabindex="0"
                 role="region"
-                aria-label="Monthly expenditure table, scrollable horizontally"
+                aria-label="Monthly expenditure table, scrollable"
                 @mouseenter="pointerInTable = true"
                 @mouseleave="pointerInTable = false; clearHover()"
                 @focusin="tableFocused = true"

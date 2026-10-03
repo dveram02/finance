@@ -4,6 +4,9 @@
 before starting the next.
 
 - **Design:** `financeupdatesep.md` · **Status log:** `financeupdatesepprogress.md`
+- **Also released in this pass:** the self-service password change — design, measurements and
+  verification in `passwordreset.md`. It is the only part of this release that needs a database
+  **permission** (Steps 5.8–5.11) and the only part that writes to a table this project does not own.
 - **Written:** 2026-09-30, against a database restored to production state as of 2026-09-29.
 - **Target for this pass:** the local test instance `V200ICTF5FA0MEL\SQLEXPRESS` (SQL Server 2022
   Developer Edition, `max server memory` 2048 MB), carrying current production **data**.
@@ -598,11 +601,33 @@ The override is required: SQL Server is native on Windows while `.env` points `S
 Laravel loads `.env` with `Dotenv::createImmutable`, so a real environment variable wins and nothing
 on disk changes. **Do not edit `.env`.**
 
-**PASS:** **0 failed.** Expect ~199 passed with ~6 skipped; every skip must be a premise guard
-("this user sees one department"), never a connection timeout. A run where ledger cases skip on
-timeout has verified almost nothing.
+**PASS:** **0 failed.** Expect **~350 passed with 7 skipped** (measured 2026-10-03; the figure was
+~199/6 when this runbook was written, before the password-change, `DirectoryFlag` and
+active-window suites were added). Every skip must be a premise guard ("this user sees one
+department"), never a connection timeout. A run where ledger cases skip on timeout has verified
+almost nothing.
 
-### Step 5.4 [WEB] Deploy and clear caches
+⚠️ **Failures mixed with a HIGH skip count mean the DB link died partway through the run**, not that
+the code is broken. `UsesLedgerData` probes once at setup and skips if SQL Server is unreachable;
+a connection that dies mid-test is past that guard and fails. A clean outage is all skips and zero
+failures (verified: 134 skipped, 223 passed, 0 failed). Re-run before investigating.
+
+### Step 5.4 [WEB] Deploy, set the new config keys, and clear caches
+
+**Three new `.env` keys ship with this release.** Add all three BEFORE clearing caches. The first
+is the deploy-first kill switch and **must go out as `false`** — the grant does not exist yet at
+this point in the runbook, and with the switch off the route refuses and the card does not render.
+
+```
+DIRECTORY_PASSWORD_CHANGE=false
+ACTIVE_USER_TTL_SECONDS=60
+ACTIVE_USER_OUTAGE_RETRY_SECONDS=15
+```
+
+All three are normalised in code and every one of them fails closed, so a typo degrades rather
+than breaks: an unusable `ACTIVE_USER_TTL_SECONDS` falls back to 60 (it can be neither 0 — which
+would be a directory round trip on every request — nor so large that the check never runs), and
+anything but a true value leaves the password feature off.
 
 ```bash
 php artisan optimize:clear
@@ -611,6 +636,19 @@ php artisan cache:clear file
 
 `cache:clear file` is separate and necessary — the filter caches live on the `file` store and plain
 `cache:clear` will not touch them.
+
+⚠️ **This release also changes authentication behaviour, independently of the password feature and
+with no database dependency:**
+
+- **`IsActive` is now read correctly.** It is a `varchar` holding the strings `'TRUE'`/`'FALSE'`,
+  and `(bool) 'FALSE'` is `true` in PHP — so until now, **setting that flag did not deactivate
+  anyone**. Nothing had broken only because every production row is `'TRUE'` and the flag had never
+  been used. After this release it works. If Finance has ever set a row to `'FALSE'` expecting it
+  to take effect, **that user loses access on this deploy** — check before releasing:
+  `SELECT UserName, IsActive FROM dbo.[0006AWebAppControls];`
+- **The active-status trust window drops from 5 minutes to 60 seconds.** The cost is bounded per
+  USER, not per request (the timestamp lives on the local `users` row), so this is at most one
+  directory read per active user per minute.
 
 ### Step 5.5 [WEB] [VERIFY] Click through all six pages
 
@@ -690,6 +728,137 @@ totals row and pagination are **absent**. An oversized result must never read as
 again. Note an `.env` edit alone does nothing under `config:cache` — the config must be rebuilt and
 the FastCGI workers recycled.
 
+### Step 5.8 [DB] 🛑 GATE 4 — sign-off before granting write access to the directory
+
+New with `passwordreset.md`. The self-service password change is the **only write this application
+performs**, and it writes to `SWRHAExpenseControl.dbo.0006AWebAppControls` — a table owned by
+another team and read by every SWRHA application, not just this portal.
+
+**Do not run Step 5.9 without written sign-off from the owner of `SWRHAExpenseControl` AND the
+DBA.** What is being granted is the ability for a web application to rewrite stored credentials
+that other systems depend on. The request should state, and they should accept, all five of:
+
+| | |
+|---|---|
+| Columns | `UserPassword`, `LastEditedBy`, `DateEdited`, `TimeEdited` — **column-level**, nothing else |
+| Predicate | `WHERE LineID = ?` (the primary key), never `WHERE UserName = ?` |
+| Precondition | the user's current password is verified with `hash_equals` first |
+| Ambiguity | a `UserName` matching anything other than exactly one row is **refused**, not resolved |
+| Audit | `LastEditedBy` = the user's display name, `DateEdited`/`TimeEdited` from `SYSDATETIME()` |
+
+Offer them `passwordreset.md` §9 (the 26 + 8 + 12 test cases) and §13.7/§14 (verified end to end
+against a real SQL Server) as the evidence.
+
+🛑 **STOP** if sign-off is not in hand. The rest of the release is unaffected — the application
+ships with the feature switched off and works normally without this grant. **There is no pressure
+to grant it on release night.**
+
+**Also confirm the production login name before granting.** Dev uses `finance`; production's
+`SQLSRV_USERNAME` must be checked, because granting to the wrong principal fails **silently**.
+
+```sql
+SELECT name, type_desc FROM sys.database_principals WHERE name = N'finance';
+```
+
+### Step 5.9 [DB] Capture the password baseline, then apply the grant
+
+**Baseline first.** Script the output to a file held **off** the database server. It is the restore
+path for a mangled password, there are only three rows, and it costs nothing.
+
+```sql
+USE SWRHAExpenseControl;
+SELECT LineID, UserName, UserPassword, IsActive, LastEditedBy, DateEdited, TimeEdited
+FROM   dbo.[0006AWebAppControls]
+ORDER  BY LineID;
+```
+
+Then run **`sql/GrantPasswordUpdate.sql`**, which contains the principal check, the grant and the
+verification queries. The grant itself is:
+
+```sql
+GRANT UPDATE (UserPassword, LastEditedBy, DateEdited, TimeEdited)
+    ON OBJECT::dbo.[0006AWebAppControls] TO [finance];
+```
+
+🔴 **Never widen this to a table-level `GRANT UPDATE`.** Nothing is simplified and the blast radius
+becomes `PositionID` — the access-control key `vw_WebAppUserAccess` joins on to decide whose
+departmental money a user can see. A bug that wrote it would be a privilege escalation. The
+column-level grant makes that impossible at the database rather than by code review.
+
+### Step 5.10 [DB] [VERIFY] Confirm the grant is exactly four columns
+
+```sql
+SELECT HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','UserPassword') AS pw,
+       HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','LastEditedBy') AS editor,
+       HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','IsActive')     AS must_be_zero,
+       HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','PositionID')   AS must_also_be_zero;
+
+SELECT p.permission_name, p.state_desc, c.name AS column_name
+FROM   sys.database_permissions p
+LEFT  JOIN sys.columns c ON c.object_id = p.major_id AND c.column_id = p.minor_id
+WHERE  p.major_id = OBJECT_ID('dbo.[0006AWebAppControls]')
+  AND  p.grantee_principal_id = DATABASE_PRINCIPAL_ID('finance')
+ORDER  BY c.name;
+```
+
+**PASS:** `pw` and `editor` are **1**, both `must_be_zero` columns are **0**, and the second query
+returns **exactly four rows** — one per granted column — and no table-level row.
+
+A `must_be_zero` of 1 means someone granted at table level. **Stop, `REVOKE`, and re-run Step 5.9.**
+
+### Step 5.11 [WEB] Enable the feature and verify it end to end
+
+Only now. Up to this point the application has been running with the card absent and the route
+refusing, which is the correct deploy-first state.
+
+```
+# In .env on the WEB server, then: php artisan config:clear
+DIRECTORY_PASSWORD_CHANGE=true
+```
+
+Note an `.env` edit alone does nothing under `config:cache` — the config must be rebuilt and the
+FastCGI workers recycled, the same caveat as Step 5.7.
+
+Then, signed in as **`FFIGUERA1`**, on `/profile`:
+
+| Check | Expect |
+|---|---|
+| Right column, under Account Status | a **Security** card with a **Change Password** button |
+| Click it | a modal opens, focus lands in **Current password** |
+| Escape / click outside / Cancel | closes, and focus returns to the button |
+| Wrong current password | inline error **under that field**; the modal **stays open**; no page-level flash |
+| A non-ASCII new password (`pàsswörd1`) | rejected with the character message — this is the **lockout guard**, not a style rule |
+| A valid change | modal closes, green **"Your password has been changed."**, and you are **still signed in** |
+| Sign out, sign in with the **new** password | works; the **old** password is rejected |
+
+Then confirm the write in SSMS:
+
+```sql
+SELECT UserName, UserPassword, DATALENGTH(UserPassword) AS bytes, LEN(UserPassword) AS chars,
+       LastEditedBy, DateEdited, TimeEdited, IsActive, PositionID
+FROM   dbo.[0006AWebAppControls] WHERE UserName = 'FFIGUERA1';
+```
+
+**PASS:** the new password is present; **`DATALENGTH = LEN`** (no encoding expansion — a mismatch
+means a character was mangled on the way in and that account is locked out); `LastEditedBy` is the
+user's display name and `DateEdited` is today; and **`IsActive`, `PositionID` and `EmployeeID` are
+unchanged**, as are the other two rows.
+
+**Then change the password back** through the same UI, which exercises the path twice.
+
+⚠️ **Tell the users before, not after.** This password is shared with every SWRHA application that
+uses the account — the portal does not own this directory, it shares it. The form says so, but the
+first someone hears of it should not be the form.
+
+Finally, confirm no password material reached the log:
+
+```bash
+grep "Directory password" storage/logs/laravel.log | tail -5
+```
+
+**PASS:** lines read `Directory password changed. {"username":"..."}` — username and outcome only,
+never a value and never a match flag.
+
 ---
 
 # Phase 6 — Restore normal operation
@@ -736,6 +905,9 @@ named owner and a date** — the repo already carries undropped `*_OversightBack
 - **`Overview.md`** rewrite explaining the split rows, the negative encumbrances and the changed
   account descriptions in plain language. Without it, all three will be reported as portal bugs.
 - Two unattended nightly runs, one exercising the 1st-of-month branch.
+- ✅ **Resolved 2026-10-03, all three** (`passwordreset.md` §15): the login outage message, the
+  `TimeEdited` precision, and the narrow-viewport check. Nothing outstanding on the password
+  change beyond the GATE 4 sign-off itself.
 
 ---
 
@@ -749,6 +921,10 @@ named owner and a date** — the repo already carries undropped `*_OversightBack
 | Requisition data | Same from `FinanceRequisitionSnapshot_ParityBackup` | seconds |
 | Added columns | `ALTER TABLE ... DROP COLUMN AccountID` on snapshot **and** `_Staging` — **required**, because the restored pre-parity function does not project it and the drift guard throws `51001` while the column exists | seconds |
 | Refresh logs | Restore from the two `*Refresh_ParityBackup` tables | seconds |
+| Password change, instantly | `DIRECTORY_PASSWORD_CHANGE=false` + `php artisan config:clear`. **Try this first** — no DBA, no redeploy | seconds |
+| Directory write permission | `sql/GrantPasswordUpdateRollback.sql` (the matching `REVOKE`). The service catches the permission error and shows "could not be changed right now", not a 500 | seconds |
+| A mangled password | One `UPDATE ... WHERE LineID = ?` from the Step 5.9 baseline, by the DBA. Note passwords already changed by users are **not** reverted by any of the above | minutes |
+| Active-window change | `ACTIVE_USER_TTL_SECONDS=300` restores the old 5-minute behaviour without a redeploy | seconds |
 | App | `git checkout <SHA from Step 0.3>` + `npm ci && npm run build` + `php artisan optimize:clear` | minutes |
 
 **Roll back both sides together.** The ledger and the requisition snapshot must be on the same basis
@@ -766,3 +942,6 @@ Any of these means stop and roll back, not push on:
 - `SplitAccountCount` above the GATE 1 baseline with no named explanation
 - Any user's accessible-account count falling to zero
 - `ledger:status` exiting non-zero
+- Step 5.10 showing `UPDATE` on any column other than the four named — `REVOKE` and re-grant
+- Step 5.11 showing `DATALENGTH <> LEN` on a changed password — a character was mangled and that
+  account is locked out; restore it from the Step 5.9 baseline before going further

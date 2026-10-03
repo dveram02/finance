@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, watch } from 'vue';
+import { useModalShell } from '@/composables/useModalShell';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -12,23 +12,12 @@ const emit = defineEmits(['close']);
 
 const close = () => emit('close');
 
-const handleEscape = (e) => {
-  if (e.key === 'Escape' && props.open) close();
-};
-
-// Stop the page behind the overlay from scrolling while the dialog is up.
-watch(
-  () => props.open,
-  (isOpen) => {
-    document.body.style.overflow = isOpen ? 'hidden' : '';
-  },
-);
-
-onMounted(() => document.addEventListener('keydown', handleEscape));
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', handleEscape);
-  document.body.style.overflow = '';
-});
+// Escape-to-close and the body scroll lock used to live here. They moved to the
+// composable so the lock could be reference counted: these two legal modals are
+// mounted on every page via FooterBar, so a page with a modal of its own had
+// three in the DOM, and whichever closed first unlocked the page under the
+// others. No visual or behavioural change to this component.
+useModalShell(() => props.open, close);
 </script>
 
 <template>
@@ -103,6 +92,19 @@ onBeforeUnmount(() => {
 .modal-enter-active,
 .modal-leave-active {
   transition: opacity 0.25s ease;
+}
+
+/* A dialog on its way out must not swallow clicks, and this also makes a
+   STUCK leave harmless rather than catastrophic. The overlay is fixed inset-0
+   with pointer-events auto, so if the leave transition never completes - the
+   element stays in the DOM at opacity 0 - it silently covers the whole page
+   and nothing is clickable. Observed under an automation harness where
+   requestAnimationFrame was throttled to a standstill, so transitionend never
+   fired; a real user would need a comparably stalled renderer to reach it.
+   One line removes the failure mode entirely. */
+.modal-leave-active,
+.modal-leave-to {
+  pointer-events: none;
 }
 
 .modal-enter-from,

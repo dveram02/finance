@@ -47,7 +47,39 @@ trait FakesExpenseControlDirectory
             $table->string('UserName');
             $table->string('UserPassword');               // plaintext in the source system
             $table->string('PositionID')->nullable();
-            $table->boolean('IsActive')->default(true);
+            // varchar holding the STRINGS 'TRUE'/'FALSE', exactly as production
+            // does - not a boolean. That is the whole point: (bool) 'FALSE' is
+            // true in PHP, so a fake storing 0/1 tests a representation the
+            // directory never produces and cannot catch the bug that caused.
+            // Callers may still pass PHP booleans; see directoryUser().
+            $table->string('IsActive')->default('TRUE');
+        });
+
+        // The BASE TABLE behind the view. vw_WebAppUsers does not expose the
+        // audit columns, so the self-service password change has to write here
+        // instead — which means the fake has to carry it too, or the one write
+        // in the whole application would have no offline coverage.
+        //
+        // Deliberately NO unique index on UserName: production has none, and
+        // adding one here would make the ambiguity-guard test unwritable.
+        Schema::connection('SWRHAExpenseControl')->create('0006AWebAppControls', function (Blueprint $table) {
+            $table->increments('LineID');
+            $table->string('EmployeeID')->nullable();
+            $table->string('UserName');
+            $table->string('UserPassword')->nullable();
+            $table->string('PositionID')->nullable();
+            $table->string('IsActive')->default('TRUE');
+            $table->string('CreatedBy')->nullable();
+            // date/time in SQL Server, strings here on purpose: SQLite gives
+            // date/time columns NUMERIC affinity, so whether '2026-10-03' lands
+            // as TEXT or 0 depends on numeral parsing. The fake's job is to let
+            // the write run and be asserted on, not to reproduce SQL Server's
+            // type system.
+            $table->string('DateCreated')->nullable();
+            $table->string('TimeCreated')->nullable();
+            $table->string('LastEditedBy')->nullable();
+            $table->string('DateEdited')->nullable();
+            $table->string('TimeEdited')->nullable();
         });
     }
 
@@ -65,11 +97,62 @@ trait FakesExpenseControlDirectory
             'UserName' => 'FFIGUERA1',
             'UserPassword' => 'correct-horse-battery',
             'PositionID' => 'POS-1',
-            'IsActive' => true,
+            'IsActive' => 'TRUE',
         ], $attributes);
 
         DB::connection('SWRHAExpenseControl')->table('vw_WebAppUsers')->insert($row);
 
-        return $row;
+        // Insert the matching base-table row as well. In production the view IS
+        // derived from this table; a fixture where the two disagree is a
+        // fiction that can only ever hide a bug.
+        $lineId = $this->directoryControlRow([
+            'EmployeeID' => $row['EmployeeID'],
+            'UserName' => $row['UserName'],
+            'UserPassword' => $row['UserPassword'],
+            'PositionID' => $row['PositionID'],
+            'IsActive' => $row['IsActive'],
+            'CreatedBy' => 'TEST FIXTURE',
+            'DateCreated' => '2026-01-01',
+            'TimeCreated' => '09:00:00',
+        ]);
+
+        return $row + ['LineID' => $lineId];
+    }
+
+    /**
+     * Insert a row into the BASE TABLE only, returning its LineID.
+     *
+     * Needed on its own for the ambiguity guard, which has to create a second
+     * row sharing a UserName. Note that SQLite compares TEXT case-sensitively,
+     * so the case-variant half of that hazard (production's collation is
+     * Latin1_General_CI_AS) cannot be reproduced here and is covered by
+     * reasoning rather than by the suite.
+     *
+     * @param  array<string,mixed>  $attributes
+     */
+    protected function directoryControlRow(array $attributes = []): int
+    {
+        return DB::connection('SWRHAExpenseControl')
+            ->table('0006AWebAppControls')
+            ->insertGetId(array_merge([
+                'EmployeeID' => '000123',
+                'UserName' => 'FFIGUERA1',
+                'UserPassword' => 'correct-horse-battery',
+                'PositionID' => 'POS-1',
+                'IsActive' => 'TRUE',
+            ], $attributes), 'LineID');
+    }
+
+    /**
+     * Read a base-table row back, for assertions.
+     *
+     * @param  array<string,mixed>  $where
+     */
+    protected function directoryControlRowWhere(array $where): ?object
+    {
+        return DB::connection('SWRHAExpenseControl')
+            ->table('0006AWebAppControls')
+            ->where($where)
+            ->first();
     }
 }
