@@ -1,11 +1,16 @@
 <script setup>
 import { usePage } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import PolicyModals from './PolicyModals.vue';
+// DISABLED 2026-10-03 — the Privacy and Terms entry points were switched off in
+// BOTH footers (here and Pages/Auth/AFooterBar.vue). The documents themselves are
+// untouched: Components/Legal/{LegalModal,PrivacyPolicyContent,TermsContent}.vue
+// and resources/js/legal.js all remain. To re-enable, uncomment this import, the
+// two refs below, the two buttons in the template, and the PolicyModals mount.
+// import PolicyModals from './PolicyModals.vue';
 
 const currentYear = ref(new Date().getFullYear());
-const showPrivacyModal = ref(false);
-const showTermsModal = ref(false);
+// const showPrivacyModal = ref(false);
+// const showTermsModal = ref(false);
 
 const page = usePage();
 const version = page.props.appVersion || '';
@@ -27,6 +32,10 @@ const openSupport = () => {
 
         <!-- Center: Quick links with icons -->
         <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 sm:gap-x-4 text-tx-subtle">
+          <!--
+            DISABLED 2026-10-03 — Privacy and Terms. Both bullet separators went with
+            them: Support is now the only link here, so a leading or trailing "•" would
+            dangle. Re-enabling means restoring the two buttons AND the two separators.
           <button
             @click="showPrivacyModal = true"
             class="hover:text-blue-600 transition-colors duration-200 flex items-center gap-1 focus:outline-none focus:text-blue-600"
@@ -43,6 +52,7 @@ const openSupport = () => {
             <span>Terms</span>
           </button>
           <span class="text-tx-subtle">•</span>
+          -->
           <button
             @click="openSupport"
             class="hover:text-blue-600 transition-colors duration-200 flex items-center gap-1 focus:outline-none focus:text-blue-600"
@@ -75,7 +85,12 @@ const openSupport = () => {
     <div class="h-0.5 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
   </footer>
 
+  <!-- DISABLED 2026-10-03 — see the note in <script setup>. With this unmounted,
+       AppLayout no longer puts two legal modals in the DOM on every page; the
+       reference-counted body scroll lock in composables/useModalShell.js is
+       unaffected either way and PasswordChangeModal still uses it.
   <PolicyModals v-model:privacy="showPrivacyModal" v-model:terms="showTermsModal" />
+  -->
 </template>
 
 <style scoped>
