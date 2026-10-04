@@ -36,7 +36,8 @@ defineProps({
     <h3 class="font-display text-base font-bold text-tx-primary mt-7 mb-3">3. Accounts and Eligibility</h3>
     <ul class="list-disc pl-6 text-tx-body space-y-2 mb-4">
       <li>Use of the System is limited to SWRHA employees and other individuals expressly authorised by SWRHA.</li>
-      <li>Accounts are created and maintained in SWRHA's staff directory system, not within the System. There is no self-registration, password change or password reset here — direct such requests to the responsible department.</li>
+      <li>Accounts are created and maintained by the <strong>Finance department</strong>, in SWRHA's staff directory system rather than within the System. There is no self-registration here, and no way to recover a forgotten password — direct both to Finance.</li>
+      <li>You may <strong>change a password you already know</strong> from your profile page, if that facility has been enabled for your organisation. Doing so changes it for <strong>every SWRHA application that uses the same account</strong>, not only this System, and signs you out on your other devices.</li>
       <li>Your account is personal to you. Do not share your credentials, and do not allow another person to use your session.</li>
     </ul>
 
@@ -45,9 +46,9 @@ defineProps({
       What you can see is determined by the departmental access assigned to your
       position in SWRHA's source systems. If no access has been assigned to you, the
       System will correctly show you no financial information; this is a matter of
-      authorisation, not a fault, and can only be changed by the department responsible
-      for granting access. You must not attempt to view information beyond the access
-      you have been granted.
+      authorisation, not a fault, and can only be changed by the <strong>Finance
+      department</strong>, which maintains the source systems. You must not attempt to
+      view information beyond the access you have been granted.
     </p>
 
     <h3 class="font-display text-base font-bold text-tx-primary mt-7 mb-3">5. Nature of the Information — No Reliance for Official Purposes</h3>

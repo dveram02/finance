@@ -728,15 +728,12 @@ totals row and pagination are **absent**. An oversized result must never read as
 again. Note an `.env` edit alone does nothing under `config:cache` — the config must be rebuilt and
 the FastCGI workers recycled.
 
-### Step 5.8 [DB] 🛑 GATE 4 — sign-off before granting write access to the directory
+### Step 5.8 [DB] [VERIFY] Confirm the grant matches the standing permission
 
 New with `passwordreset.md`. The self-service password change is the **only write this application
-performs**, and it writes to `SWRHAExpenseControl.dbo.0006AWebAppControls` — a table owned by
-another team and read by every SWRHA application, not just this portal.
-
-**Do not run Step 5.9 without written sign-off from the owner of `SWRHAExpenseControl` AND the
-DBA.** What is being granted is the ability for a web application to rewrite stored credentials
-that other systems depend on. The request should state, and they should accept, all five of:
+performs**. It writes to `SWRHAExpenseControl.dbo.0006AWebAppControls`, which is a **pre-existing
+table** — but this project holds a standing permission to edit **exactly four of its columns**, and
+the grant is cut to match that permission precisely and nothing wider.
 
 | | |
 |---|---|
@@ -746,15 +743,15 @@ that other systems depend on. The request should state, and they should accept, 
 | Ambiguity | a `UserName` matching anything other than exactly one row is **refused**, not resolved |
 | Audit | `LastEditedBy` = the user's display name, `DateEdited`/`TimeEdited` from `SYSDATETIME()` |
 
-Offer them `passwordreset.md` §9 (the 26 + 8 + 12 test cases) and §13.7/§14 (verified end to end
-against a real SQL Server) as the evidence.
+🔴 **The four columns are the whole permission. Nothing else on this table, and nothing on any
+other pre-existing table, may be written** — see the hard rule in `CLAUDE.md`. If a future change
+appears to need a fifth column, that is a design error, not a grant to widen.
 
-🛑 **STOP** if sign-off is not in hand. The rest of the release is unaffected — the application
-ships with the feature switched off and works normally without this grant. **There is no pressure
-to grant it on release night.**
-
-**Also confirm the production login name before granting.** Dev uses `finance`; production's
+**Confirm the production login name before granting.** Dev uses `finance`; production's
 `SQLSRV_USERNAME` must be checked, because granting to the wrong principal fails **silently**.
+
+Nothing else in the release depends on this step. The application ships with the feature switched
+off and works normally without the grant, so it can be deferred without holding anything up.
 
 ```sql
 SELECT name, type_desc FROM sys.database_principals WHERE name = N'finance';
@@ -907,7 +904,7 @@ named owner and a date** — the repo already carries undropped `*_OversightBack
 - Two unattended nightly runs, one exercising the 1st-of-month branch.
 - ✅ **Resolved 2026-10-03, all three** (`passwordreset.md` §15): the login outage message, the
   `TimeEdited` precision, and the narrow-viewport check. Nothing outstanding on the password
-  change beyond the GATE 4 sign-off itself.
+  change beyond the DBA applying the grant (Steps 5.8–5.9).
 
 ---
 

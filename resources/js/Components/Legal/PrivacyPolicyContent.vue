@@ -23,6 +23,7 @@ defineProps({
     <h3 class="font-display text-base font-bold text-tx-primary mt-7 mb-3">1. Information We Process</h3>
     <ul class="list-disc pl-6 text-tx-body space-y-2 mb-4">
       <li><strong>Account information:</strong> your username, employee identifier, display name and active/inactive status. This information originates in SWRHA's existing staff directory system; the System reads it to verify who you are and keeps a local copy so pages can be rendered.</li>
+      <li><strong>Your password:</strong> checked against the staff directory when you sign in. If the password-change facility is enabled for your organisation, a new password you set on your profile page is written back to that same directory — the only information this System writes anywhere. Your current password must be supplied first. Password values are never written to application logs.</li>
       <li><strong>Access entitlements:</strong> the position, responsibility and department records that determine which financial information you are permitted to see.</li>
       <li><strong>Financial information:</strong> departmental budget allocations, expenditure, commitments and related account details. This is organisational financial data. It is not personal information about you, and the System does not hold client, patient or payroll records.</li>
       <li><strong>Session and technical records:</strong> a session cookie that keeps you signed in, and application logs recording events such as sign-in attempts, errors and data-source failures, together with the date, time and originating address.</li>
@@ -53,10 +54,11 @@ defineProps({
       The System does not originate financial records. It reads from SWRHA's existing
       finance and staff systems and presents that information in a consolidated,
       read-only form. Figures are drawn from a periodically refreshed copy of the
-      source data, so recently posted transactions may not yet appear. Corrections to
-      any underlying record — including account details, allocations, transactions and
-      departmental access — are made in the originating system by the responsible
-      department, not in this System.
+      source data, so recently posted transactions may not yet appear. Those source
+      systems are maintained by the <strong>Finance department</strong>, and corrections
+      to any underlying record — allocations, transactions, account details and
+      departmental access — are made there rather than in this System. The single
+      exception is your own password, where the change facility is enabled.
     </p>
 
     <h3 class="font-display text-base font-bold text-tx-primary mt-7 mb-3">5. Access and Disclosure</h3>
@@ -78,7 +80,7 @@ defineProps({
     <ul class="list-disc pl-6 text-tx-body space-y-2 mb-4">
       <li>The System is hosted on SWRHA-controlled infrastructure and reachable only from the authority's network.</li>
       <li>Traffic is protected in transit using HTTPS/TLS.</li>
-      <li>There is no public sign-up, self-registration or password-reset facility — accounts exist only because they were created in SWRHA's staff directory system.</li>
+      <li>There is no public sign-up, self-registration, or facility to recover a forgotten password — accounts exist only because they were created in SWRHA's staff directory system. Where the password-change facility is enabled, it requires your current password and cannot be used to regain access to an account you are already locked out of.</li>
       <li>Your active status is re-checked against the source directory at regular intervals during a session; if your account is deactivated, access ends without waiting for you to sign out.</li>
       <li>Sign-in attempts are rate-limited, and all data pages are read-only — the System cannot alter financial records.</li>
     </ul>
@@ -101,9 +103,10 @@ defineProps({
     <p class="text-tx-body mb-4">
       You may view the account details held about you on your profile page, ask for a
       correction to those details, ask what departmental access has been assigned to
-      you, and raise a privacy concern. Because account and access records are managed
-      in SWRHA's source systems, requests are actioned there; contact the address below
-      and it will be directed to the responsible department.
+      you, and raise a privacy concern. Accounts are managed by the <strong>Finance
+      department</strong> in SWRHA's source systems rather than in this System, so
+      requests are actioned there; contact the address below and it will be directed to
+      them.
     </p>
 
     <h3 class="font-display text-base font-bold text-tx-primary mt-7 mb-3">9. Contact</h3>

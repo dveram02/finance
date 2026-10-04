@@ -34,9 +34,12 @@ will correctly delete this feature as rule-violating.
 | Rule | Where | Amendment |
 |---|---|---|
 | *"No registration, password reset, or 2FA routes exist … Do not add them."* and *"`GET /profile` is read-only … there is no profile edit form. **Do not add one.**"* | `CLAUDE.md`, Authentication & Users | Carve out exactly one write route, `POST /profile/password`. Everything else stays forbidden. |
-| *"On production, only ever write to the objects THIS project created … **Every pre-existing table and view is off limits**, including the `0006*` access-control tables … This is a hard constraint, not a preference."* | `CLAUDE.md`, The Finance Ledger | Narrow, named exception: this app may write **`UserPassword`, `LastEditedBy`, `DateEdited`, `TimeEdited`** on `dbo.0006AWebAppControls`, for the authenticated user's own row only, keyed on `LineID`. Everything else on every `0006*` table stays read-only. |
+| *"On production, only ever write to the objects THIS project created … **Every pre-existing table and view is off limits**, including the `0006*` access-control tables … This is a hard constraint, not a preference."* | `CLAUDE.md`, The Finance Ledger | Record the standing permission this project actually holds: **`UserPassword`, `LastEditedBy`, `DateEdited`, `TimeEdited`** on `dbo.0006AWebAppControls`, for the authenticated user's own row only, keyed on `LineID`. Everything else on every pre-existing table stays read-only. |
 
-The second needs the **owning team's written sign-off** before deployment — see §8.2.
+🔴 **Those four columns are not an exception this project invented — they are the whole of the
+permission it holds** (confirmed 2026-10-03). The pre-existing tables are otherwise untouchable;
+what this project may create freely is **new objects of its own**. If a future change appears to
+need a fifth column, that is a design error, not a grant to widen.
 
 `CLAUDE.md` is gitignored and **not recoverable from git**. Edit it with the write-then-rename
 discipline its own repo-quirks note mandates.
@@ -47,6 +50,13 @@ discipline its own repo-quirks note mandates.
 changed here changes it for **every application that reads this directory**, not just the Finance
 Portal. That is a communications decision, not a code one: users must be told before go-live, and
 the form copy must say it.
+
+**The Finance department maintains all three source databases** (`SWRHAExpenseControl`,
+`FinanceAutomationSystem`, `ArrearsDatabase`), confirmed 2026-10-03 — so they are the people who
+will field "my password stopped working" if this goes wrong, which is why the user comms matter.
+Note that administering the schema is **not** what makes the write safe: the risk is to the other
+applications reading these tables, and that is unchanged by who administers them. It is the
+four-column scope that keeps it safe.
 
 ---
 
@@ -548,14 +558,14 @@ column (§7.3).
 **Confirm the production login name first.** Dev uses `finance`; verify production's
 `SQLSRV_USERNAME` matches before scripting it.
 
-### 8.2 Who approves
+### 8.2 Who applies it
 
-`CLAUDE.md` is unambiguous that the `0006*` tables belong to another team. This needs **written**
-sign-off from the owner of `SWRHAExpenseControl` and the DBA — what is being granted is the ability
-for a web application to rewrite stored credentials used by other systems. The request should
-state: the exact four columns, the exact predicate (`WHERE LineID = ?`), that the app verifies the
-current password first, that it refuses on ambiguity, and that the audit columns are stamped from
-the server clock. Offer §9's test list as evidence.
+The scope matches a **standing permission this project already holds** — those four columns and
+nothing else — so this is applying a grant, not negotiating a new one. What is still needed is the
+**DBA** to run it on production, and it is worth them seeing exactly what it does: the four
+columns, the predicate (`WHERE LineID = ?`), that the app verifies the current password first,
+that it refuses on ambiguity, and that the audit columns are stamped from the server clock. Offer
+§9's test list as evidence. The pre-existing tables remain otherwise untouchable (§1.1).
 
 Worth one question to that team at the same time: **does any other application that writes this
 directory enforce its own password rules, or read `UserPassword` into a narrower field?** A
@@ -564,7 +574,7 @@ directory enforce its own password rules, or read `UserPassword` into a narrower
 ### 8.3 Order of operations
 
 > 📌 **As of 2026-10-03 this sequence lives in the release runbook**, as
-> `finance_sep_update_deployment.md` **Steps 5.8–5.11** (sign-off gate → baseline + grant → verify
+> `finance_sep_update_deployment.md` **Steps 5.8–5.11** (confirm the scope → baseline + grant → verify
 > the grant is exactly four columns → enable and verify end to end), with the rollback rows and
 > stop conditions added there too. The runbook is what gets executed; what follows is the
 > rationale behind it.
@@ -876,11 +886,11 @@ not dropped at the top of the document.
 
 ## 12.5 Still outstanding
 
-1. 🔴 **Written sign-off from the owner of `SWRHAExpenseControl` and the DBA** for
-   `sql/GrantPasswordUpdate.sql`. Nothing else here can proceed without it. This is now **GATE 4**
-   in `finance_sep_update_deployment.md` Step 5.8, which carries the five points the ask has to
-   make. The rest of the release is unaffected if sign-off is not in hand — the app ships with the
-   feature switched off — so there is no pressure to grant it on release night.
+1. **The DBA to apply `sql/GrantPasswordUpdate.sql` on production** —
+   `finance_sep_update_deployment.md` Step 5.8, which carries the scope table. The grant matches a
+   permission this project already holds, so it is an application rather than a negotiation. The
+   rest of the release is unaffected until it happens: the app ships with the feature switched off
+   and works normally without the grant.
 2. **Confirm the production login name** — dev is `finance`; verify production's `SQLSRV_USERNAME`
    before granting to the wrong principal, which fails silently.
 3. **Ask that team whether any other consumer of this directory enforces its own password rules**,
@@ -1412,5 +1422,5 @@ it had the same latent exposure.
 Suite **352 passed, 7 skipped, 0 failed** (was 350/7). `npm run build` clean, `npm run test:js`
 12 passed, Pint clean.
 
-Nothing remains outstanding on the password change except **GATE 4 sign-off** itself
-(`finance_sep_update_deployment.md` Step 5.8).
+Nothing remains outstanding on the password change except **applying the grant on production**
+(`finance_sep_update_deployment.md` Steps 5.8–5.9).

@@ -457,9 +457,10 @@ description); choosing a description narrows the account-number list.
 - An **inactive account is not a credential failure**: the user is authenticated, then immediately
   logged out with "Your account has been deactivated." A wrong password gives the generic failure.
 - The display name comes from `EmployeeName`, falling back to `UserName` when it is blank.
-- There is **no registration, forgotten-password link or 2FA** — accounts are managed entirely in
-  the external system. Staff who have forgotten their password still have to ask for it to be
-  reset. Someone who *knows* their password can now change it themselves, on the Profile page.
+- There is **no registration, forgotten-password link or 2FA**. Accounts are managed by the
+  **Finance department**, in the external staff directory rather than in this portal. Staff who
+  have forgotten their password still have to ask Finance to reset it. Someone who *knows* their
+  password can now change it themselves, on the Profile page.
 - Active status is re-verified against SQL Server **every 60 seconds** while browsing, so an account
   deactivated by the Finance department loses access within about a minute. A SQL Server
   outage during re-verification never deactivates anyone.
