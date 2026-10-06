@@ -450,7 +450,14 @@ SELECT (SELECT COUNT(*) FROM dbo.FinanceLedgerSnapshot_ParityBackup)      AS led
        (SELECT COUNT(*) FROM dbo.FinanceRequisitionRefresh_ParityBackup)  AS req_log;
 ```
 
-**PASS:** **22352** · **108435** · **13** · **35**.
+**PASS (2026-09-29 data):** 22352 · 108435 · 13 · 35.
+
+🆕 **Measured 2026-10-06 on the 05-10 restore: 22354 · 109104 · 13 · 43.**
+
+🔑 **The row counts are NOT the check — they drift with production every night.** The check is that
+the four backup counts **equal the four source counts**, which is why a `SOURCE_COUNTS` row was
+added beside them. Confirmed identical 2026-10-06. Compare the two rows the script prints; do not
+compare either against the numbers above.
 
 ### Step 2.2 [DB] [VERIFY] Capture the per-year before-state
 
@@ -464,6 +471,43 @@ FROM dbo.FinanceLedgerSnapshot GROUP BY FinancialYear ORDER BY FinancialYear DES
 ```
 
 **Keep this output.** It is the only record of what the figures were, and Finance will ask.
+
+🆕 **Captured 2026-10-06, local restore of the 05-10-2026 production databases — the PRE-PARITY
+figures:**
+
+| FY | accounts | Allocation | YTDTotal | Approved | Routing |
+|---|---|---|---|---|---|
+| 2026 | 2,267 | 242,817,848.52 | 254,553,116.94 | 99,890,944.67 | 12,166,750.08 |
+| 2025 | 2,117 | 198,009,100.00 | 266,968,436.41 | 74,173,406.72 | 3,377,383.46 |
+| 2024 | 1,886 | 0.00 | 252,965,146.64 | 35,416,144.98 | 3,458,987.64 |
+| 2023 | 785 | 0.00 | −117,774,963.13 | 0.00 | 0.00 |
+| 2022 | 1,020 | 0.00 | 268,601,782.14 | 0.00 | 0.00 |
+| 2021 | 1,378 | 0.00 | 122,153,215.10 | 2,629,887.27 | 11,138,095.57 |
+| 2020 | 1,882 | 0.00 | 477,424,672.57 | 30,722,030.39 | 3,996,245.41 |
+| 2019 | 1,835 | 0.00 | 321,318,067.54 | 9,889,989.02 | 1,308,026.04 |
+| 2018 | 1,864 | 0.00 | 316,277,169.72 | 5,720,249.10 | 577,312.09 |
+| 2017 | 1,837 | 0.00 | 303,288,734.76 | 3,372,156.84 | 48,533.84 |
+| 2016 | 1,697 | 0.00 | 272,943,370.48 | 2,683,555.61 | 732.00 |
+| 2015 | 1,972 | 0.00 | 641,286,549.61 | 23,622,836.79 | 42,874.86 |
+| 2014 | 1,814 | 0.00 | 314,246,008.91 | 146,088,238.33 | 26,615.95 |
+| **TOTAL** | **22,354** | **440,826,948.52** | **3,694,251,307.69** | **434,209,439.72** | **36,141,556.94** |
+
+🔴 **These figures are EXPECTED to change at the cutover, and two of them substantially. Do not
+read the differences as defects:**
+
+- **`Approved` 434,209,439.72 → ~353,219,050.22.** The parity change removes the zero floor on
+  encumbrance, so over-received lines now carry a NEGATIVE commitment. This is the single largest
+  visible movement in the release and it is deliberate — `financeupdatesep.md` has the rationale.
+- **Row counts rise where accounts SPLIT.** Per-year the increase equals that year's split count:
+  FY2026 2,267 → 2,278 (+11), FY2025 2,117 → 2,121 (+4), FY2018 1,864 → 1,867 (+3), FY2017
+  1,837 → 1,840 (+3), FY2024 1,886 → 1,887 (+1), FY2015 1,972 → 1,973 (+1).
+- **`Allocation` and `YTDTotal` barely move** — 440,826,948.52 → .69 and 3,694,251,307.69 → .70,
+  sub-dollar, which is the float artifact documented at step 1.4, not a change in the money.
+- **FY2023's negative YTD (−117.8M) is pre-existing source data**, not something this release
+  introduces. It is unchanged by the cutover.
+
+**Allocation is 0.00 for every year before FY2025** because `0040CBudgetsAllocation` holds no
+earlier rows — source data, not a filter bug.
 
 ---
 
@@ -492,20 +536,37 @@ throw `51001`. **Rollback:** re-run `sql/FinanceLedger.sql`, then
 EXEC dbo.usp_RefreshFinanceLedgerSnapshot @FinancialYear = '2026';
 ```
 
-**PASS — the procedure returns one row:**
+**PASS — the procedure returns one row.** 🆕 **Measured 2026-10-06 on the 05-10 restore, 15 s
+(`DurationSeconds`), 17.1 s wall clock:**
 
-| Column | Expected |
-|---|---|
-| RowsLoaded | **2275** |
-| TotalAllocation | 242,817,848.69 |
-| TotalYTD | 254,553,116.94 *(unchanged)* |
-| TotalApproved | **83,803,914.38** *(was 95,760,870.05)* |
-| TotalRouting | 12,637,933.09 *(unchanged)* |
-| UndefinedLabelPct | 0.00 |
-| AccountsLoaded | **2264** |
-| SplitAccountCount | **11** |
+| Column | 2026-09-29 | **2026-10-06 (current)** |
+|---|---|---|
+| RowsLoaded | 2275 | **2278** |
+| TotalAllocation | 242,817,848.69 | **242,817,848.69** |
+| TotalYTD | 254,553,116.94 | **254,553,116.94** |
+| TotalApproved | 83,803,914.38 *(was 95,760,870.05)* | **88,092,538.18** *(was 99,890,944.67)* |
+| TotalRouting | 12,637,933.09 | **12,401,480.96** |
+| UndefinedLabelPct | 0.00 | **0.00** |
+| AccountsLoaded | 2264 | **2267** |
+| SplitAccountCount | **11** | **11** |
 
-`@Force` should not be needed. If it aborts, read the message before reaching for it.
+🔑 **The real check is not the column values — it is that they EQUAL the figures steps 1.2 and 1.3
+produced.** All six money and count figures match the draft and the parity function exactly
+(2278 / 2267 / 242,817,848.69 / 254,553,116.94 / 88,092,538.18 / 12,401,480.96). That is what proves
+the refresh stored what the function computes. Compare against your own step 1.2/1.3 output, not
+against the table above.
+
+`TotalApproved` dropping 99,890,944.67 → 88,092,538.18 is the **encumbrance floor removal** — the
+intended headline change, not a loss of data.
+
+`@Force` was not needed. If it aborts, read the message before reaching for it.
+
+⚠️ **This run was made with `ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP = 1`** on the restored
+database, because the refresh proc calls the source function internally and so cannot take a
+per-statement hint — at the instance default this box stalls on `CXSYNC_PORT` (see the
+plan-equivalence warning). It was 0 before and must be set back to 0 afterwards. **Production should
+not need this**, and because the cap changes float addition order the stored cents here are specific
+to this box.
 
 ### Step 3.3 [DB] [VERIFY] 🛑 GATE 2 — is the DATA right?
 
@@ -515,11 +576,25 @@ query, per year.
 > `sql/ParityReconciliation.sql` does **not** substitute for this. It compares function to function,
 > so it passes whatever is in the snapshot and cannot detect a bad refresh.
 
-**PASS:** FY2026 row reads `PASS` with `draft_only = 0`, `snap_only = 0`, `mult_diffs = 0`,
-`draft_rows = snap_rows = 2275`, `draft_splits = snap_splits = 11`.
+**PASS:** FY2026 row reads `PASS` with `tol_draft_only = 0`, `tol_snap_only = 0`, `mult_diffs = 0`,
+`draft_rows = snap_rows`, `draft_splits = snap_splits = 11`.
 
-**Expected and NOT a failure:** every other year reports `FAIL`. They still hold pre-parity snapshot
-data and have not been rebuilt yet — they are fixed in Phase 4. Only FY2026 matters at this gate.
+🆕 **Measured 2026-10-06, 97.6 s — FY2026 PASSED, and BIT-IDENTICALLY:**
+
+```
+PER_YEAR 2026  exact_draft_only 0  exact_snap_only 0  tol_draft_only 0  tol_snap_only 0
+               tolerated_rows 0  max_abs_delta NULL  2278 = 2278  mult_diffs 0  splits 11 = 11  PASS
+```
+
+🔑 **`tolerated_rows 0` is the result to note.** The money tolerance was available and **was not
+needed** — the stored snapshot matches Access to the cent on all 2,278 rows. The tolerance exists
+for the float artifact at step 1.4; it did not quietly paper over anything here.
+
+**Expected and NOT a failure:** every other year reports `FAIL`, with large `max_abs_delta` values
+(FY2025 shows 3.7e12). They still hold pre-parity snapshot data and have not been rebuilt — Phase 4
+fixes them. Those deltas are the pre-parity-vs-parity difference, not float noise. Only FY2026
+matters at this gate. The `VERDICT` line will read **`FAIL - DO NOT PROCEED`** at this point *because
+of those twelve years* — read the FY2026 row, not the verdict, until Phase 4 is done.
 
 🛑 **STOP if FY2026 is not `PASS`.** Only one year has moved.
 **Rollback:**
@@ -557,19 +632,75 @@ WHERE FinancialYear='2026' AND UserName='FFIGUERA1'
 
 **PASS:**
 
-| Check | Expected |
-|---|---|
-| Split example | two rows — `RENT & ACCOMODATION` (ytd 253,000.00, alloc 0.00, approved 0.00) and `RENT & ACCOMMODATION` (ytd 0.00, alloc 521,336.04, approved 138,000.00) |
-| FFIGUERA1 accounts | **14** |
-| FFIGUERA1 **total** approved | **346,568.08** *(was 411,118.08)* |
-| FFIGUERA1 alloc / routing | 7,548,334.91 · 229,173.20 *(both unchanged)* |
-| `4-80400-H01-101-2001-00-000` approved | **129,100.00** *(was 193,650.00)* |
+| Check | 2026-09-29 | **2026-10-06 (measured)** | |
+|---|---|---|---|
+| Split example | two rows (below) | **two rows, exactly as described** | ✅ |
+| FFIGUERA1 accounts | 14 | **14** | ✅ |
+| FFIGUERA1 **total** approved | 346,568.08 *(was 411,118.08)* | **428,008.08** | drift |
+| FFIGUERA1 alloc | 7,548,334.91 | **7,548,334.91** | ✅ |
+| FFIGUERA1 routing | 229,173.20 | **204,709.08** | drift |
+| `4-80400-H01-101-2001-00-000` approved | 129,100.00 *(was 193,650.00)* | **193,650.00** | see below |
 
-> **Do not confuse these two figures** — an earlier draft of this runbook did, and it turns a passing
-> step into a false alarm. `129,100.00` / `193,650.00` are the **per-account** values for
-> `4-80400-H01-101-2001-00-000`; `346,568.08` / `411,118.08` are the **user totals**. The whole
-> 64,550.00 difference sits on that one account (eight lines on PO00000202871 with `Quantity` 1 and
-> `QtyShipped` 2), so the two deltas are the same number viewed at two grains.
+**Split example, verified 2026-10-06** — `4-87300-C20-101-2004-00-000` returns two rows:
+`RENT & ACCOMODATION` (ytd 253,000.00, alloc 0.00, approved 0.00) and `RENT & ACCOMMODATION`
+(ytd 0.00, alloc 521,336.04, approved 138,000.00). The one-M / two-M spelling split is the worked
+example of the release and it reproduces exactly.
+
+🔴 **FFIGUERA1's total approved is the figure to check, and the check is that it EQUALS step 1.2's
+`SCOPED_2026` approved.** Measured 2026-10-06: both **428,008.08**. That is the portal agreeing with
+Access for the only mapped user. Do not compare it against the 2026-09-29 number.
+
+#### 🛑 The `4-80400-H01-101-2001-00-000` worked example is STALE — do not treat it as a failure
+
+The runbook expected **129,100.00** post-parity against **193,650.00** pre-parity, the difference
+being eight over-received lines on `PO00000202871`. On 2026-10-05 data that is no longer true, and it
+was established by measurement rather than assumed:
+
+| Source | Approved |
+|---|---|
+| `fn_OversightDraftUnscoped('2026')` — **Access itself** | **193,650.00** |
+| `FinanceLedgerSnapshot` — the rebuilt parity snapshot | **193,650.00** |
+| `FinanceLedgerSnapshot_ParityBackup` — **pre**-parity | **193,650.00** |
+
+Pre-parity and post-parity are now **identical on that account**, so its lines are no longer
+over-received and the floor removal has nothing to act on there. **Access and the portal agree
+exactly**, which is what the step is actually for.
+
+🔑 **The floor removal IS working — it has simply moved to other accounts.** Measured 2026-10-06,
+**16 FY2026 accounts carry a negative commitment**, each sitting at 0.00 pre-parity:
+
+| Account | Parity | Pre-parity | Delta |
+|---|---|---|---|
+| `4-87300-H05-401-0627-00-000` | **−500,000.00** | 0.00 | −500,000.00 |
+| `4-75600-D02-401-0627-00-000` | **−239,149.40** | 0.00 | −239,149.40 |
+| `4-87200-D01-304-0526-00-000` | **−26,643.32** | 0.00 | −26,643.32 |
+| `4-87200-D02-304-0526-00-000` | **−26,643.32** | 0.00 | −26,643.32 |
+| `4-87200-D03-304-0526-00-000` | **−26,643.32** | 0.00 | −26,643.32 |
+
+FY2026 `Approved` total: **99,890,944.67 pre-parity → 88,092,538.18 parity.**
+
+🔴 **LESSON FOR THIS STEP: never pin it to a named account again.** Which accounts are over-received
+changes with daily shipment activity, so any single-account expectation goes stale within weeks and
+reads as a deployment failure. **Check instead that (a) `COUNT(*) WHERE Approved < 0` is non-zero in
+FY2026, and (b) the FY2026 `Approved` total fell by roughly 12M against the backup.** Both are
+properties of the behaviour rather than of one row:
+
+```sql
+SELECT 'NEGATIVE_COMMITMENTS' AS chk, COUNT(*) AS accounts
+FROM dbo.FinanceLedgerSnapshot WHERE FinancialYear='2026' AND Approved < 0;
+
+SELECT 'APPROVED_TOTALS' AS chk,
+  (SELECT CONVERT(decimal(19,2),SUM(Approved)) FROM dbo.FinanceLedgerSnapshot_ParityBackup WHERE FinancialYear='2026') AS preparity,
+  (SELECT CONVERT(decimal(19,2),SUM(Approved)) FROM dbo.FinanceLedgerSnapshot)              AS parity;
+```
+
+> **Do not confuse per-account and user-total figures** — an earlier draft of this runbook did, and
+> it turns a passing step into a false alarm. The per-account values belong to one account; the
+> 428,008.08-style figures are **user totals** across fourteen accounts.
+
+**Note:** `FinanceRequisitionSnapshot` still reports **0** negative `ActBalance` rows at this point.
+That is correct — Phase 2's snapshot has not been rebuilt in lockstep yet. Phase 4 does it, and
+negatives appear there.
 
 ---
 
@@ -633,8 +764,65 @@ Three of these look wrong and are not:
   Everywhere else it is unchanged. Earlier drafts of this runbook claimed Routing never moves; that is
   true only of FY2026.
 
-`TotalAllocation` moves in **one** year only: FY2026, by **+0.17**. `TotalYTD` is unchanged in every
-year — if it moves anywhere, stop.
+`TotalAllocation` moves in **one** year only: FY2026, by **+0.17**.
+
+🆕 **CORRECTION 2026-10-06 — `TotalYTD` is NOT unchanged in every year, and the old "if it moves
+anywhere, stop" rule is a FALSE STOP.** Measured: YTD moves in exactly **one** year, **FY2025, by
++0.01** — the known float artifact of step 1.4, the same cent, on the same account. Allocation
+moves only in FY2026, by +0.17, as stated. **The correct rule: YTD must be unchanged everywhere
+EXCEPT a sub-cent move in FY2025; anything larger, or in any other year, is a STOP.**
+
+> ⚠️ **Verify this with aggregates computed SEPARATELY per side, then joined.** Joining the snapshot
+> to the backup on `FinancialYear` and *then* summing is a per-year **cartesian product** and inflates
+> both sides by the other's row count — it reported "6 years moved" before being corrected to the
+> true answer of one. Easy mistake, convincing wrong answer:
+>
+> ```sql
+> WITH s AS (SELECT FinancialYear, CONVERT(decimal(19,2),SUM(YTDTotal)) AS ytd
+>            FROM dbo.FinanceLedgerSnapshot GROUP BY FinancialYear),
+>      b AS (SELECT FinancialYear, CONVERT(decimal(19,2),SUM(YTDTotal)) AS ytd
+>            FROM dbo.FinanceLedgerSnapshot_ParityBackup GROUP BY FinancialYear)
+> SELECT s.FinancialYear, s.ytd - b.ytd AS ytd_delta
+> FROM s JOIN b ON b.FinancialYear = s.FinancialYear WHERE s.ytd <> b.ytd;
+> ```
+
+### 🆕 Measured 2026-10-06 — step 4.1 on the 05-10 restore: **185.8 s, all 13 years `OK`**
+
+Far under the 15–45 minute budget (serial, `MAXDOP 1`; per-year `DurationSeconds` 10–19).
+
+| FY | rows | AccountsLoaded | Splits | TotalApproved before → after |
+|---|---|---|---|---|
+| 2026 | 2,278 | 2,267 | 11 | 99,890,944.67 → **88,092,538.18** |
+| 2025 | 2,121 | 2,117 | 4 | 74,173,406.72 → **49,572,302.86** |
+| 2024 | 1,887 | 1,886 | 1 | 35,416,144.98 → **14,578,345.22** |
+| 2023 | 785 | 785 | 0 | 0.00 → 0.00 |
+| 2022 | 1,020 | 1,020 | 0 | 0.00 → 0.00 |
+| 2021 | 1,378 | 1,378 | 0 | 2,629,887.27 → 2,629,887.27 |
+| 2020 | 1,882 | 1,882 | 0 | 30,722,030.39 → **26,469,743.06** |
+| 2019 | 1,835 | 1,835 | 0 | 9,889,989.02 → **9,516,144.20** |
+| 2018 | 1,867 | **1,864** | 3 | 5,720,249.10 → **−1,444,587.97** |
+| 2017 | 1,840 | **1,837** | 3 | 3,372,156.84 → **−3,974,133.73** |
+| 2016 | 1,697 | 1,697 | 0 | 2,683,555.61 → **2,401,407.89** |
+| 2015 | 1,973 | 1,972 | 1 | 23,622,836.79 → **19,761,636.34** |
+| 2014 | 1,814 | **1,813** | 1 | 146,088,238.33 → **145,615,766.90** |
+
+**Three documented oddities all reproduced exactly:** FY2017 and FY2018 go negative at
+**−3,974,133.73** and **−1,444,587.97** — *identical to the 2026-09-30 predictions*, because those
+years are closed and their source does not drift. FY2014 holds its row count (1,814 → 1,814) while
+`AccountsLoaded` reveals **1,813** distinct accounts. Every row `Outcome = 'OK'`, no `ABORTED`.
+
+🔑 **Why the CLOSED years match the predictions to the cent and the open years do not.** FY2014–FY2023
+match because their source is frozen; FY2024–FY2026 drift because requisitions churn daily. **A
+corollary that is easy to get wrong: for FY2026 the before/after comparison is NOT a clean parity
+comparison at all.** The `_ParityBackup` row was built by the nightly job on **2026-10-04 21:31**,
+while the rebuild reads today's source — so its delta mixes the parity change with two days of
+requisition movement. That is why FY2026 `TotalRouting` **rose** (12,166,750.08 → 12,401,480.96),
+which removing a floor alone can never do. **Judge the open years against the step 1.2/1.3 draft
+figures, not against the backup.**
+
+The earlier claim that Routing falls in FY2024 by 107,341.68 and FY2025 by 0.01 is also drift-bound:
+measured 2026-10-06, FY2024 Routing is **unchanged**, FY2025 fell by **29,420.18** and FY2026 rose.
+Do not expect specific Routing deltas.
 
 > `usp_RefreshFinanceLedgerSnapshotAll` logs a failing year and continues, throwing only at the end —
 > so **read this table** rather than trusting the absence of an error.
@@ -645,6 +833,27 @@ Run **`sql/ParitySnapshotCheck.sql`** again.
 
 **PASS:** `VERDICT` reads `PASS - the stored snapshot matches Access`, `years_failing = 0`, and all 13
 per-year rows `PASS`.
+
+🆕 **Measured 2026-10-06 — PASSED, 99.7 s, `years_failing = 0`, all 13 years `PASS`:**
+
+```
+VERDICT  years_checked 13  years_failing 0  total_missing_from_snapshot 0
+         total_extra_in_snapshot 0  total_tolerated_rows 1
+         total_multiplicity_diffs 0   ->  PASS - the stored snapshot matches Access
+
+TOLERATED  FY2025  4-76100-H01-203-0251-00-000  Feb  818,966,030,193.12 -> ...93.11  -0.01
+```
+
+**Twelve of thirteen years are BIT-IDENTICAL to Access** (`exact_draft_only 0`, `exact_snap_only 0`,
+`tolerated_rows 0`), including every year with splits. Row counts and split counts match in all
+thirteen.
+
+🔑 **Note which cells the tolerance absorbed here: `Feb` ALONE.** In the GATE 1 run the same account
+reported `Feb`, `Q2` **and** `YTDTotal`; here `Q2` and `YTDTotal` agree and only `Feb` differs. Same
+data, same account, same cent, different set of columns — **this is the plan-dependence documented at
+step 1.4 showing up again, and it is the reason the tolerance is per-cell rather than per-figure.**
+Do not expect the tolerated list to be identical between runs; expect it to stay *small and on known
+accounts*.
 
 🛑 **STOP on any failing year.** **Rollback:** re-run `sql/FinanceLedger.sql`, then restore the
 snapshot wholesale from `_ParityBackup`, then drop the two added columns.
@@ -715,6 +924,31 @@ The message also reports **685 rows with an unparseable account number**. Pre-ex
 this release, and invisible to every user because they match no access grant — but worth knowing if
 Finance ever asks why detail row counts do not tie to the raw table.
 
+🆕 **Measured 2026-10-06 — GATE 3 PASSED, 38 s (38.6 s wall clock):**
+
+| Field | Expected | **Measured** | |
+|---|---|---|---|
+| `Outcome` | `OK` | **OK** | ✅ |
+| `ReconMismatches` | **0** | **0** | ✅ |
+| `ReconStaleYearDrift` | **0** | **0** | ✅ |
+| `ReconAccountsCompared` | ≈22,351 | **22,354** | ✅ |
+| `DuplicateGrainRows` | 0 | **0** | ✅ |
+| `RowsLoaded` | — | 109,256 (16 FYs) | |
+| `UnparsedSegmentRows` | 685 | **685** (unchanged) | ✅ |
+| `TotalApproved` / `TotalRouting` | *not comparable — see warning above* | 362,698,460.83 / 37,207,767.10 | |
+
+🔑 **The `ReconStaleYearDrift` transition is the evidence this phase ordering works.** The preceding
+**nightly** row (2026-10-04 21:31) shows `ReconStaleYearDrift = **9**`; this run shows **0**. Under
+the nightly job only two years are freshly rebuilt, so nine years legitimately sat outside the 36-hour
+window; rebuilding all thirteen first — the deliberate order change at the head of this phase —
+brings it to zero and makes the gate unambiguous. **A non-zero value here would mean a year did not
+rebuild.** (The runbook previously said the nightly rows show 7; measured 2026-10-06 it is 9. The
+number depends on when the nightly job last ran — do not treat a specific value as expected.)
+
+`ReconAccountsCompared` came in at **22,354**, slightly *above* the predicted 22,351 rather than
+below — the freshness `INNER JOIN` is reconciling every year, which is what this figure exists to
+confirm.
+
 🛑 **This gate is never bypassable by `@Force`, deliberately.** Diagnose with
 `sql/Phase2ReconciliationTest.sql`. Do not relax `@ReconToleranceTTD`.
 **Rollback:** re-run `sql/FinanceRequisition.sql`, then `EXEC dbo.usp_RefreshFinanceRequisition
@@ -741,14 +975,25 @@ FROM dbo.vw_FinanceLedger WHERE FinancialYear='2026' AND UserName='FFIGUERA1';
 
 **PASS:**
 
-| Check | Expected |
-|---|---|
-| FY2026 negative lines / accounts / value | **694** · **62** · **−17,363,584.00** *(was 0 lines)* |
-| `detail_approved` = `summary_approved` | **346,568.08** — these are FFIGUERA1's **totals** |
-| `detail_routing` = `summary_routing` | **229,173.20** *(unchanged by parity)* |
+| Check | 2026-09-30 | **2026-10-06 (measured)** | |
+|---|---|---|---|
+| FY2026 negative lines / accounts / value | 694 · 62 · −17,363,584.00 | **674** · **59** · **−17,265,069.60** | ✅ non-zero |
+| `detail_approved` = `summary_approved` | 346,568.08 | **428,008.08 = 428,008.08** | ✅ **exact** |
+| `detail_routing` = `summary_routing` | 229,173.20 | **204,709.08 = 204,709.08** | ✅ **exact** |
 
-The equality is the point, not the value: detail and summary must agree **to the cent**. That is
-Phase 2's reconciliation surviving all the way through to the views the pages actually read.
+🔑 **The equality is the point, not the value: detail and summary must agree TO THE CENT.** Both
+pairs matched exactly on 2026-10-06. That is Phase 2's reconciliation surviving all the way through
+to the views the pages actually read — and it is the check to make, because the absolute figures
+drift daily while the equality must never break.
+
+The negative-line counts drifted (694 → 674 lines, 62 → 59 accounts) for the same reason as
+everything else open-year: shipment activity. **Check that they are NON-ZERO**, not that they match
+a stored number — they were 0 before the cutover, so non-zero is the signal that the floor removal
+reached the requisition snapshot.
+
+> Same warning as Step 3.4 — do **not** expect `129,100.00` here. That is a **per-account** figure;
+> these are **user totals**. Both earlier drafts of this runbook made that substitution, which
+> reports a passing step as a failure.
 
 > Same warning as Step 3.4 — do **not** expect `129,100.00` here. That is the **per-account** figure
 > for `4-80400-H01-101-2001-00-000`; `346,568.08` is the **user total**. Both earlier drafts of this
@@ -758,20 +1003,30 @@ Phase 2's reconciliation surviving all the way through to the views the pages ac
 
 # Phase 5 — Application release
 
-### Step 5.1 [WEB] Fix the Vite manifest — do this before building
+### Step 5.1 [WEB] ✅ ALREADY DONE — fixed in `45652ae` (2026-10-01), verified again 2026-10-06
 
-`resources/views/app.blade.php:32` requests `resources/css/app.css`, but `vite.config.js:8` declares
-only `resources/js/app.js` as an input, so a fresh build produces a manifest without that key and
-`Vite::asset()` throws `ViteException` on **every** page. `resources/js/app.js:1` already does
-`import '../css/app.css'`, so the JS entry emits the CSS itself.
+**Do not make the edit this step used to describe. It is already applied, and the description of
+`vite.config.js` below the fix line was wrong in a way that would break things if acted on.**
 
-Change line 32 of `resources/views/app.blade.php` to:
+Verified in the working tree 2026-10-06:
 
-```blade
-@vite(['resources/js/app.js'])
-```
+| File | State |
+|---|---|
+| `resources/views/app.blade.php:41` | `@vite(['resources/js/app.js'])` — JS entry only ✅ |
+| `vite.config.js` | declares **BOTH** `resources/js/app.js` **and** `resources/css/app.css` |
+| `resources/views/errors/_layout.blade.php:7` | `@vite(['resources/css/app.css'])` |
 
-The test suite cannot catch this — `Tests\TestCase` calls `withoutVite()` — so the check is manual.
+🔴 **The CSS input in `vite.config.js` is NOT redundant and must not be removed.** The original
+wording of this step said `vite.config.js` "declares only `resources/js/app.js`", which invites
+someone to leave it that way. It must declare both: `resources/views/errors/_layout.blade.php` — which
+six **Blade** error views extend — asks for the stylesheet alone, because those pages are deliberately
+not Inertia and must not boot the Vue app. Without the CSS input `Vite::asset()` throws for them on a
+clean build, **and because a `ViteException` renders the 500 page, which extends that same layout, the
+failure recurses.** The sibling inventory-app's single JS-only input is not sufficient here for exactly
+that reason. Both halves of the fix are load-bearing; simplify neither.
+
+The test suite cannot catch any of this — `Tests\TestCase` calls `withoutVite()` — so step 5.2 is the
+only check.
 
 ### Step 5.2 [WEB] [VERIFY] Build from clean and confirm the manifest
 
@@ -784,6 +1039,20 @@ cat public/build/manifest.json | head -40
 
 **PASS:** build succeeds, and the manifest contains an entry for `resources/js/app.js` with a `css`
 array. No page may reference a manifest key that is absent.
+
+🆕 **Measured 2026-10-06 — PASSED.** `public/build` deleted first, so this was a genuinely clean
+build: `✓ built in 8.14s`. Manifest holds **10 keys**, and both required entries are present:
+
+| Key | File | `css` array |
+|---|---|---|
+| `resources/js/app.js` | `assets/app-C29zY09s.js` | **`['assets/app-B5beW7-l.css']`** ✅ |
+| `resources/css/app.css` | `assets/app-U-9DTqip.css` | — (it *is* the stylesheet) ✅ |
+
+Both keys present is the whole point — the JS entry for the Inertia pages, the CSS entry for the six
+Blade error views. The remaining eight keys are Font Awesome webfonts.
+
+The `(!) Some chunks are larger than 500 kB` warning on `app-C29zY09s.js` (615.72 kB, 195.34 kB
+gzipped) is Vite's default advisory, pre-existing and **not** a failure of this step.
 
 ### Step 5.3 [WEB] [VERIFY] Run the test suite
 
@@ -806,6 +1075,81 @@ almost nothing.
 the code is broken. `UsesLedgerData` probes once at setup and skips if SQL Server is unreachable;
 a connection that dies mid-test is past that guard and fails. A clean outage is all skips and zero
 failures (verified: 134 skipped, 223 passed, 0 failed). Re-run before investigating.
+
+### ✅ PASSED 2026-10-06 — 352 passed, 7 skipped, 0 failed, 3,402 assertions, 260.4 s
+
+**Run against PARITY data** — the rebuilt snapshots, split rows and signed encumbrance — so this is
+the first evidence the application layer agrees with the new figures. Matches the expected
+"~350 passed with 7 skipped" exactly.
+
+🔑 **All seven skips are premise guards, and ZERO are connection timeouts** — "This user sees one
+department…", "The ledger holds one depart…", "Premise f…". That is the only shape of skip that
+counts as a pass here; a run where ledger cases skip on a timeout has verified almost nothing.
+
+🔴 **IT WAS RUN INSIDE THE SAIL CONTAINER, NOT FROM THE WINDOWS HOST**, because on this machine the
+host cannot reach MySQL at all (below). The command:
+
+```bash
+docker exec -e DB_HOST=mysql finance-laravel.test-1 php artisan test
+```
+
+Two things make that correct rather than a fudge:
+
+- **`phpunit.xml` sets no `force="true"` on any `<env>`**, so a real environment variable takes
+  precedence over the file. `-e DB_HOST=mysql` therefore overrides the hardcoded `localhost`.
+- **`SQLSRV_HOST` must be LEFT ALONE inside the container** — `.env`'s `host.docker.internal` is
+  already right there, and it reaches SQL Server on the Windows host. The `SQLSRV_HOST=127.0.0.1`
+  override in the step above is **only** for running from the Windows host. Applying both at once
+  is the mistake to avoid.
+
+Measured from inside the container: MySQL connect **0.02 s**, SQL Server connect **0.05 s**.
+
+#### Why the Windows-host route does not work on this machine
+
+**Port 3306 is unreachable from Windows even with the MySQL container healthy and the port
+published.** `docker port` reports `3306/tcp -> 0.0.0.0:3306`, but every connection attempt returns
+**`WSAEACCES (10013)` — "An attempt was made to access a socket in a way forbidden by its access
+permissions"**. `netsh interface ipv4 show excludedportrange protocol=tcp` lists **no** range
+covering 3306, so this is not the usual Hyper-V port reservation. Unresolved; the container route
+sidesteps it entirely.
+
+Before Docker was started the symptom was different and simpler: the **`MySQL84` Windows service was
+Stopped**, and a host-side run stalled for **31 minutes on 6.8 s of CPU** — every test burning a
+connection timeout. ⚠️ **That signature — long wall clock, almost no CPU — means a database is
+unreachable, not that the suite is slow.** Check it before waiting.
+
+#### Getting the dev dependencies installed (the earlier blocker, now resolved)
+
+<details>
+<summary>`vendor/` had been installed <code>--no-dev</code>; <code>composer install</code> failed twice on Windows file locking</summary>
+
+`vendor/composer/installed.json` held **91 packages** with `phpunit/phpunit`,
+`nunomaduro/collision`, `mockery/mockery`, `fakerphp/faker` and `laravel/breeze` all absent — so
+`artisan test` was not a registered command (`Command "test" is not defined`).
+
+`composer install` then failed twice with:
+
+```
+In Filesystem.php line 311:
+  Could not delete .../vendor/composer/tmp-<hash>.zip:
+  This can be due to an antivirus or the Windows Search Indexer locking the file
+```
+
+🔴 **The failure leaves EMPTY package directories behind.** `vendor/phpunit/phpunit/` and
+`vendor/nunomaduro/collision/` both existed afterwards while containing no files, so a path check
+reports them "present" when nothing is installed. **Check `installed.json`, not the directory.**
+
+Ruled out: no Docker containers were running at the time (`docker ps` empty), so a bind-mount was
+not holding the files. Fixes, in order of likelihood: exclude the project directory from real-time
+AV scanning and delete `vendor/composer/tmp-*.zip`; or `composer install --prefer-source`, which
+clones instead of extracting zips.
+
+**Production is unaffected** — its `vendor/` is installed `--no-dev` deliberately and the suite is
+not expected to run there.
+
+</details>
+
+---
 
 ### Step 5.4 [WEB] Deploy, set the new config keys, and clear caches
 
