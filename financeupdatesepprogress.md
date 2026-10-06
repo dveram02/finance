@@ -14,7 +14,7 @@ change). Read this before believing any status claim elsewhere, including the pl
 
 | # | Workstream | State |
 |---|---|---|
-| 1 | Parity source built and proven against the Access query | ✅ **DONE — GATE 1 PASSED**, all 13 FYs, 0 differences |
+| 1 | Parity source built and proven against the Access query | ✅ **GATE 1 PASSES — all 13 FYs, 2026-10-06, local 05-10 restore** (`@MaxDop 1`, tolerance 0.01, 191.5 s). Twelve years bit-identical; one tolerated row (FY2025, one cent of float representation, named in the output). Got here via two FAILs — production 2026-10-05 and local 2026-10-06 — whose cause was measured, not guessed, and fixed in the GATES, not the function. 🔴 **Production must still be re-gated ON production with `@MaxDop 0`** — a capped run is not evidence about an uncapped one |
 | 2 | Fiscal-year control on Encumbered / Routing Details | ✅ DONE (committed `79eef8e`). **🆕 SUPERSEDED 2026-10-01 — the select is now OPTIONAL, defaulting to All Fiscal Years. See the entry at the foot of this file and `routingupdateprogress.md`** |
 | 3 | Knock-on fixes the parity change forces (`PartiallyReceived`, ordering tiebreak) | ✅ DONE |
 | 4 | Tests updated + new offline coverage for the sign change | ✅ DONE — 199 passed / 6 skipped / 0 failed |
@@ -22,7 +22,7 @@ change). Read this before believing any status claim elsewhere, including the pl
 | 6 | Promote into `fn_FinanceLedgerSource`, `AccountID` columns, new gates | 🟡 **WRITTEN + rehearsed, then DISCARDED by the 2026-09-30 restore.** `sql/FinanceLedgerParityCutover.sql` is ready and was applied cleanly once |
 | 7 | Phase 2 in lockstep (`ActCost` + gate F aggregation) | ✅ **APPLIED, GATE 3 PASSED** on the test instance |
 | 8 | The ten other files carrying the floored expression | ⬜ NOT STARTED |
-| 9 | GATE 2 → GATE 3 | ✅ **ALL THREE GATES PASSED** on the test instance, 2026-09-30. Phase 5 (app release) is next |
+| 9 | GATE 2 → GATE 3 | ✅ **ALL THREE GATES PASSED** on the test instance, 2026-09-30. 🔴 **GATE 2 carries the same float exposure GATE 1 failed on** — it compares the function's output to the stored snapshot, so it can fail with no defect present. Read the 2026-10-05 entry before running it |
 | 10 | Vite manifest fix — **blocks any web release** | ⬜ NOT STARTED |
 | 11 | `Overview.md` for Finance, `oversight-parity-steps.md` runbook, remaining `CLAUDE.md` rules | ⬜ NOT STARTED |
 | 12 | Monitoring registration (open since 2026-08-26) | ⬜ NOT STARTED |
@@ -30,6 +30,11 @@ change). Read this before believing any status claim elsewhere, including the pl
 **Nothing is deployed.** No pre-existing SQL object has been altered and no snapshot rebuilt, so the
 live portal still serves the **pre-parity** figures. The three new SQL functions are additive and
 droppable. The app-side change is committed to the working tree only.
+
+🆕 **Production carries NONE of this as of 2026-10-05.** The GATE 1 attempt described at the foot of
+this file was undone by `sql/ParityGate1Undo.sql`: all three scratch functions dropped,
+`fn_FinanceLedgerSource` still pre-parity, Agent job re-enabled, no `AccountID` column and no
+`_ParityBackup` tables. Verified.
 
 ---
 
@@ -588,3 +593,323 @@ scripted edit that opened the file for writing and only then failed to encode it
 `CLAUDE.md` and `.claude/` are **gitignored**, so there was nothing to restore from and the file was
 rebuilt by hand. When editing it from a script, encode the whole new text first — or write a temp
 file and rename.
+
+---
+
+## 2026-10-05 — GATE 1 FAILED ON PRODUCTION, and the cause is float non-associativity
+
+**The production attempt was aborted cleanly at GATE 1. Nothing live was changed; everything was
+undone the same day.** This entry is the record of why, because the cause is **not** a defect in the
+parity logic and a future attempt will hit it again.
+
+### What happened
+
+The runbook was taken as far as step 1.4 against **production** (`sqlapp\SQLEXPRESS`), on production
+data as of 2026-10-05. `sql/ParityReconciliation_Gate1.sql` returned:
+
+```
+VERDICT   total_draft_only 1   total_parity_only 1   total_multiplicity_diffs 0
+          years_with_rowcount_diff 0   years_with_split_diff 0   ->  FAIL - DO NOT DEPLOY
+```
+
+Twelve of thirteen fiscal years were byte-identical. **FY2025** reported `draft_only 1`,
+`parity_only 1`, with `draft_rows = parity_rows = 2121`, `mult_diffs = 0` and `splits 4 / 4`.
+
+🔴 **That signature is NOT a grain defect, and reading it as one wastes the day.** `mult_diffs = 0`
+means every grain key appears the same number of times on both sides; the row counts and split
+counts agree. So one row shares its key across both sides and differs only in a **money** column.
+
+### The actual difference — one cent
+
+`sql/Gate1Diagnose_FY2025.sql` (written for this; read-only) isolated it to one row:
+FY2025 · `4-76100-H01-203-0251-00-000` · FOOD SUPPLIES · H01/203/0251 · AccountID 12480.
+
+| Column | Draft (Access) | Parity | Delta |
+|---|---|---|---|
+| `Feb` | 818,966,030,193.12 | 818,966,030,193.11 | **−0.01** |
+| `Q2` | 3,714,287,202,312.62 | 3,714,287,202,312.61 | −0.01 (carries Feb) |
+| `YTDTotal` | 6,315,268.79 | 6,315,268.78 | −0.01 (carries Feb) |
+
+**Only `Feb` is an independent finding** — `Q2` and `YTDTotal` are derived from the monthly values
+and inherit the same cent. It **reproduced identically** on a second materialisation, so it is not a
+moving source.
+
+### Why — and it is NOT a logic difference
+
+`dbo.0098AFinGLMaster.NetChange` is **`float`**, and **both sides sum it as float**: the draft
+through `PIVOT (SUM(NetChange) …)`, the parity function through
+`SUM(CASE WHEN Measure = '2' THEN Amount END)`. Same rows, same branch, same filter — but a
+different physical aggregation plan, therefore a different **addition order**, and float addition is
+not associative.
+
+`sql/Gate1Diagnose_FloatOrder.sql` measured February for that account — 1,208 GL rows, 10 of them
+over 1bn, max absolute value **1,774,376,625,857.04**:
+
+```
+exact_decimal_sum   818,966,030,193.109965   -> rounds to .11
+float_sum           818,966,030,193.114746   -> .11
+sum_small_first     818,966,030,193.109863
+sum_large_first     818,966,030,193.109253
+```
+
+**Three different float answers for one set of rows, spanning 0.0055** — more than half a cent,
+straddling the `.115` boundary that `ROUND(…, 2)` turns into a whole cent. One ulp of a double at
+1.77e12 is ~0.00024, so a few hundred additions with heavy cancellation drift into millicents.
+
+🔴 **The parity function is the one that is RIGHT.** The exact decimal sum is `…93.109965`, which
+rounds to **.11** — what the parity function produced. The draft, i.e. **Access, is the cent that is
+wrong**. GATE 1 failed because the new function is *more accurate* than the query it is measured
+against. There is no branch to fix.
+
+### The part that matters more than the cent
+
+- 🔴 **It is a lottery across five accounts, not one bad row.** Every GL account carrying
+  billion-scale entries, measured 2026-10-05 — all FY2025:
+
+  | Account | rows ≥ 1bn | max abs |
+  |---|---|---|
+  | `4-20700-A01-401-0627-00-000` | 30 | 12,999,999,999,999.87 |
+  | `4-42800-A01-401-0627-00-000` | 2 | 12,999,999,999,999.87 |
+  | `4-76100-H01-203-0251-00-000` | 22 | 3,058,823,528,651.52 |
+  | `4-76100-H04-203-0251-00-000` | 5 | 1,274,509,804,830.00 |
+  | `4-76100-E03-106-1127-00-000` | 9 | 509,803,921,441.92 |
+
+  The two at **13 trillion** have an ulp of ~0.002 per addition and are *more* exposed than the one
+  that actually failed. They passed by luck.
+- 🔴 **GATE 1 is therefore NON-DETERMINISTIC on production.** The same query gave three different
+  sums above. Plan shape, parallelism and row order decide the cent, so the gate can pass, then fail
+  on an identical dataset, on a different account each time.
+- 🔴 **GATE 2 (`ParitySnapshotCheck.sql`) is exposed the same way** — it compares the function's
+  output to the stored snapshot, so it too can fail with no defect present.
+- **The shipped snapshot stops being bit-reproducible.** Two refreshes of an unchanged fiscal year
+  can differ by a cent on these accounts. The refresh proc's movement gates sit far above that so
+  nothing will abort, but "re-running the refresh reproduces the snapshot" is no longer strictly
+  true.
+
+### 2026-10-06 — REPRODUCED on the local restore, and the mechanism is now proven
+
+The 05-10-2026 production databases were restored to a local SQL Server 2022 instance
+(**Developer Edition, `EngineEdition` 3, RTM 16.0.1000.6, 2048 MB, 12 CPUs, instance MAXDOP 12,
+cost threshold 5**) and the gate re-run. Results:
+
+| Run | Instance | Parallelism | Elapsed | Verdict |
+|---|---|---|---|---|
+| 2026-09-29 | test instance | default | ~70 s | PASS, 0 differences |
+| 2026-10-05 | production `sqlapp\SQLEXPRESS` (Standard) | default | — | **FAIL** 1/1 FY2025 |
+| 2026-10-06 | local restore (Developer) | **MAXDOP 1** | **226.9 s** | **FAIL** 1/1 FY2025 |
+
+**Identical failure**: same account, same `Feb` column, same values, same cent, `mult_diffs 0`,
+`GRAIN_MISMATCH` empty. Steps 1.2 and 1.3 both passed, and the parity function's FY2026 figures
+matched the draft's in all six values.
+
+🔴 **`OPTION (MAXDOP 1)` was REQUIRED to run anything here.** At the instance default (DOP 12),
+materialising `fn_FinanceLedgerAccessParity('2026')` into a temp table **stalled 11 minutes** on
+`CXSYNC_PORT` with **2,293 logical reads and zero tempdb allocation** — a parallel-exchange stall,
+not work, on an RTM build with known `CXSYNC_PORT` hangs. Capped, the same statement took **12.3 s**.
+The gate materialises 26 such sets. **Cap both sides, never one** — a one-sided cap puts a plan
+asymmetry inside the comparison itself. The committed `sql/ParityReconciliation_Gate1.sql` was left
+**unmodified**; the capped copy lives in the scratchpad, because the hint is a property of this box,
+not of the gate.
+
+#### The mechanism, now measured rather than inferred
+
+Over the identical 1,208 February rows for that account:
+
+| How summed | Result | Rounds to |
+|---|---|---|
+| **Exact (`decimal`) — the true value** | 818,966,030,193.**109965** | **.11** |
+| Production, default plan | …93.114746 | .11 |
+| Local, parallel (DOP 12) | …93.110107 | .11 |
+| **Local, `MAXDOP 1`** | …93.**115479** | **.12** |
+| Production, forced small-first | …93.109863 | .11 |
+| Production, forced large-first | …93.109253 | .11 |
+
+**Five different float answers for one set of rows. `MAXDOP` alone flips the cent.** The exact value
+rounds to **.11** — the parity function's answer. `exact_decimal_sum` is **identical on both
+machines**, confirming the restore is faithful and the data is not the variable.
+
+🔴 **The decisive observation.** `sql/Gate1Diagnose_FY2025.sql` **Part 2** re-materialises the *same
+two functions* over a **reduced 9-column projection** and returned `draft_only 0, parity_only 0` —
+the `YTDTotal` cent **agreed** — in the same session, at the same `MAXDOP 1`, minutes after Part 1
+showed it differing. SQL Server inlines these TVFs into the calling query, so **the surrounding
+projection changes the plan, changes the addition order, changes the cent.** The disagreement is a
+property of the *whole statement*, not of the parity logic.
+
+Three things follow, and they close the question:
+
+1. **No tuning will make this gate pass.** Re-running it is not a strategy.
+2. **Narrowing the comparison to obtain agreement would be self-deception** — Part 2 agrees because
+   it compares fewer columns, not because the arithmetic improved.
+3. **A future "it passed" is luck, not a fix**, and must not be recorded as evidence.
+
+The tolerance is therefore no longer a judgement call about whether to mask a risk: **without it
+this gate cannot function.** The recommendation below stands unchanged, and is now the only way
+forward that does not involve weakening the comparison.
+
+#### The money at stake, measured — `sql/ParityMoneyDelta.sql` (new)
+
+GATE 1 counts differing **rows**, and reported one. That is not the same claim as "the money differs
+by one cent" — a single differing row could in principle hide a large delta — so the money was
+measured directly. Each side materialised once per year, every figure `CONVERT`ed to
+`decimal(19,2)` **per row** before summing, so the comparison contributes no float error of its own.
+Measured 2026-10-06, all 13 FYs, 214.4 s:
+
+| Figure | 13-FY total (draft) | Parity − draft |
+|---|---|---|
+| Allocation | 440,826,948.69 | **0.00** |
+| Approved | 353,219,050.22 | **0.00** |
+| Routing | 36,346,867.64 | **0.00** |
+| YTDTotal | 3,694,251,307.70 | **−0.01** (FY2025 only) |
+| Row count | — | **0 in every year** |
+
+`months_delta` is the same −0.01 (`YTDTotal` is derived from the months), so `total_abs` reads 0.02
+— one cent counted twice, not two cents.
+
+🔑 **The whole disagreement between the portal and the finance department's Access query is ONE CENT
+in 3.69 BILLION — 2.7e-12 — and the portal is the correct side.** Re-run this file after any change
+to the parity function: a delta that grows beyond a cent is a real defect, not an artifact.
+
+**Process note worth keeping:** the first version of that script called the functions five times per
+side per year (130 builds, ~19 min) instead of materialising once (26 builds, ~3.5 min) — exactly
+what `ParityReconciliation_Gate1.sql`'s own header warns against. The warning is there because it is
+easy to do; the file now repeats it.
+
+### ✅ 2026-10-06 — THE TOLERANCE IS IMPLEMENTED, AND GATE 1 PASSES
+
+Both gate scripts changed. 🔴 **They are read-only test harnesses — no data, no stored figure, no
+page and no export changed. Only what the TEST calls a failure changed.**
+
+**`sql/ParityReconciliation_Gate1.sql`** (GATE 1) and **`sql/ParitySnapshotCheck.sql`** (GATE 2):
+
+- Money compares at **≤ `@Tolerance`, default 0.01**, and **every tolerated row is PRINTED** —
+  account, column, both values, delta — plus a summary with the largest delta and the tolerance in
+  force. The listing is the half that keeps the tolerance honest.
+- **Grain stays EXACT**: row counts, per-grain-key multiplicity, split counts and the key columns
+  carry no tolerance at all.
+- **The exact comparison is still reported** per year (`exact_draft_only` / `exact_parity_only`), so
+  a bit-identical year still reads as bit-identical.
+- **A NULL-vs-value mismatch is NEVER tolerated** — otherwise "no activity" and "exactly zero" merge.
+- **`@MaxDop`** knob: 0 production, 1 local restore, applied to both sides or neither.
+- GATE 1 was rewritten from **thirteen copy-pasted blocks into one loop**, so the comparison exists
+  once. The old shape would have needed the tolerance correct in thirteen places.
+
+**GATE 1, measured 2026-10-06 — local restore, `@MaxDop 1`, `@Tolerance 0.01`, 191.5 s: PASS.**
+`total_draft_only 0`, `total_parity_only 0`, `total_tolerated_rows 1`, `mult_diffs 0`,
+`years_with_rowcount_diff 0`, `years_with_split_diff 0`. **Twelve of thirteen years bit-identical.**
+The one tolerated row is FY2025 `4-76100-H01-203-0251-00-000`, three cells (`Feb`, `Q2`,
+`YTDTotal`) at −0.01 — **one cent propagating, not three defects.**
+
+#### Verified rather than assumed
+
+| Test | Result |
+|---|---|
+| GATE 1, 13 FYs, tolerance 0.01 | **PASS**, 1 tolerated row, named |
+| GATE 1, FY2025, **tolerance 0** | **FAIL 1/1** — old behaviour reproduced exactly |
+| GATE 2 tolerance path (stand-in source) | **PASS**, same single tolerated row |
+
+The middle row matters: the header claims `@Tolerance = 0` restores the old behaviour, and that is
+now measured.
+
+#### Three implementation traps, recorded because they will recur
+
+1. 🔴 **`(a IS NULL) <> (b IS NULL)` is a SYNTAX ERROR** — T-SQL has no boolean type. The NULL
+   patterns are compared as 0/1 `CASE` flags instead.
+2. 🔴 **Msg 468, collation conflict.** Temp **tables** take tempdb's collation
+   (`SQL_Latin1_General_CP1_CI_AS`); a table **variable** takes the current database's
+   (`Latin1_General_CI_AS`). Joining them fails. Every string column in both scripts is now
+   `COLLATE DATABASE_DEFAULT`. The previous versions never hit this because they never used a table
+   variable.
+3. 🔴 **A table variable declared INSIDE a `WHILE` body is not re-created per iteration** — it would
+   accumulate rows across fiscal years and every count after the first would be wrong. Declared
+   outside the loop, emptied at the top of each iteration.
+
+#### 🔴 GATE 2's exposure is WORSE than GATE 1's, and the scripts now say so
+
+GATE 1 compares two functions evaluated in one session. GATE 2 compares a function evaluated **now**
+against values the refresh **stored on an earlier night**, under whatever plan was in force then. One
+side is already on disk, so **re-running cannot make them converge**. Without the tolerance that gate
+would fail intermittently on a correct deployment — the worst kind of gate: one that cries wolf and
+gets ignored.
+
+#### Still unexercised
+
+**GATE 2 cannot be run against the real snapshot yet** — it selects `AccountID` from
+`FinanceLedgerSnapshot`, which runbook **step 3.1** adds. This is **pre-existing** (the previous
+version had the same dependency), not a regression. The GATE 2 test above therefore used
+`fn_FinanceLedgerAccessParity` as a **stand-in** for the snapshot: the tolerance machinery is proven,
+the snapshot read itself is not, and it cannot be until after the cutover.
+
+### 🛑 Consequence for testing on a RESTORED LOCAL INSTANCE
+
+The plan after this abort is to restore the production databases to a local SQL Server 2022 instance
+and re-run the gate there. **A clean GATE 1 locally does NOT prove production will pass**, and this
+is the trap to avoid: the float addition order is a property of the **execution plan**, and that
+changes with edition, `max server memory`, core count and DOP. Local is Developer edition with
+different memory and parallelism from `sqlapp\SQLEXPRESS` Standard. The *data* will be identical;
+the *sums* need not be.
+
+So local is the right place to develop and prove the **tolerance change** — but the verdict it
+returns is instance-specific, and **production must be re-gated on production**.
+
+### The open decision — NOT yet taken
+
+How GATE 1 should treat a sub-cent float artifact. Recommended, and not yet applied:
+
+- money columns compare at **≤ 0.01**, and **every row that uses the tolerance is listed in the
+  output**, so a tolerance that starts absorbing more than these known accounts is visible rather
+  than silent;
+- **grain, row counts, multiplicity and split counts stay EXACT** — those are the actual subject of
+  this release, and were identical across all thirteen years, FY2026's eleven splits included;
+- keep the exact-comparison count as a separate reported column, so a bit-identical year is still
+  visibly bit-identical.
+
+**Rejected:** aggregating in `decimal` on both sides of the gate. It would give a deterministic
+comparison, but the deployed function must sum floats to match Access, so it would test something
+other than what ships — hiding this behaviour rather than recording it.
+
+### Data quality, and the limit of what this project may do
+
+The root cause is the trillion-scale offsetting journal entries in `dbo.0098AFinGLMaster` — a FOOD
+SUPPLIES account with a 2.0M allocation carrying Dec −3,714,285,689,284.16 against Jan
++2,895,320,880,063.63 and netting to a plausible 6.3M year, plus two accounts at
+12,999,999,999,999.87 that look like data-entry errors. **That is a pre-existing table this project
+may only read.** It is a conversation to have with Finance; it is not something to correct here, and
+no `UPDATE` against it may be proposed as a fix.
+
+### Every expected figure in the runbook is now stale
+
+Production has refreshed nightly since the 2026-09-29 baseline. Measured 2026-10-05, pre-parity:
+
+| | Runbook (2026-09-29) | Production (2026-10-05) |
+|---|---|---|
+| `FinanceLedgerSnapshot` FY2026 rows | 2,265 | **2,267** |
+| FY2026 `Approved` | 95,760,870.05 | **99,890,944.67** |
+| `fn_OversightDraftUnscoped('2026')` rows | 2,275 | **2,278** |
+
+Step 0.1's `PASS` values and step 1.3's whole expected table must be **re-measured**, not treated as
+mismatches. The gate does not compare against them, which is why this drift failed nothing — but a
+reader following the runbook will stop on them.
+
+### Undo — production is clean
+
+`sql/ParityGate1Undo.sql` was written and run. Verified output:
+
+```
+POST_UNDO   parity_fn dropped   draft_unscoped dropped   draft_verbatim dropped
+            live_ledger_fn pre-parity (correct)   agent_job_enabled 1
+```
+
+Steps 1.1 and 1.3 create **three functions and nothing else** — no table created, altered or
+written, no live object replaced, nothing in the request path referencing them. Step 1.4 and both
+diagnostics are read-only and `#temp` only. **The single change with operational consequence was
+step 0.2 disabling the Agent job**, and that is the part of the undo that matters: left disabled,
+both snapshots go stale and nothing alerts, because the production health-check task has still never
+been registered (open since 2026-08-26 — workstream 12).
+
+### Artefacts added
+
+| File | What it is |
+|---|---|
+| `sql/Gate1Diagnose_FY2025.sql` | Names the differing row and unpivots the money columns to find the differing one; Part 2 re-materialises both sides to separate a real difference from a moving source. Read-only, diagnostic only |
+| `sql/Gate1Diagnose_FloatOrder.sql` | Computes the month three ways — float, exact decimal, and two forced addition orders — and lists every GL account with billion-scale entries. This is the file that settles the cause |
+| `sql/ParityGate1Undo.sql` | Undoes runbook steps 0.2–1.4: confirms Phase 1 was as far as it got, re-enables the Agent job, drops the three scratch functions, verifies |

@@ -24,18 +24,52 @@ before starting the next.
 Every expected figure below was measured on this data on 2026-09-29. If a figure differs, that is
 information, not necessarily a failure — but **stop and check** rather than continuing.
 
-## Confirmed starting state (2026-09-30)
+## Confirmed starting state
 
-| | Value |
-|---|---|
-| `fn_FinanceLedgerSource` / `usp_RefreshFinanceLedgerSnapshot` / `usp_RefreshFinanceRequisition` | pre-parity |
-| `AccountID`, `AccountsLoaded`, `SplitAccountCount` | absent |
-| Scratch parity/draft functions, `_ParityBackup` tables | absent |
-| `FinanceLedgerSnapshot` FY2026 | 2,265 rows / 2,265 accounts / Approved 95,760,870.05 |
-| `FinanceLedgerSnapshot` FY2025 | 2,117 rows / 2,117 accounts / Approved 74,173,406.72 |
-| `FinanceRequisitionSnapshot` | 108,435 rows, **0** negative balances |
-| `FinanceLedgerRefresh` / `FinanceRequisitionRefresh` | 13 / 35 rows, last OK 2026-09-28 21:33 |
-| Agent job `SWRHA Finance - Ledger Refresh` | **not present on this instance** (`msdb` not restored) |
+🆕 **Re-measured 2026-10-05 on the 05-10-2026 production restore.** Every figure below moved
+between the two runs because production refreshes nightly. **The 2026-10-05 column is the live
+expectation; the 2026-09-30 column is kept only so a reader can tell drift from a defect.** A figure
+that differs from the newer column is information — re-measure before calling it a failure.
+
+| | 2026-09-30 (first rehearsal) | **2026-10-05 (current)** |
+|---|---|---|
+| `fn_FinanceLedgerSource` / `usp_RefreshFinanceLedgerSnapshot` / `usp_RefreshFinanceRequisition` | pre-parity | **pre-parity** |
+| `AccountID`, `AccountsLoaded`, `SplitAccountCount` | absent | **absent** |
+| Scratch parity/draft functions, `_ParityBackup` tables | absent | **absent** |
+| `FinanceLedgerSnapshot` FY2026 | 2,265 rows / Approved 95,760,870.05 | **2,267 rows / Approved 99,890,944.67** |
+| `FinanceLedgerSnapshot` FY2025 | 2,117 rows / Approved 74,173,406.72 | **2,117 rows / Approved 74,173,406.72** (unchanged) |
+| `FinanceRequisitionSnapshot` | 108,435 rows, **0** negative balances | **109,104 rows, 0** negative balances |
+| `FinanceLedgerRefresh` / `FinanceRequisitionRefresh` | 13 / 35 rows, last OK 2026-09-28 21:33 | **13 / 43 rows, last OK 2026-10-04 21:31** |
+| Agent job `SWRHA Finance - Ledger Refresh` | **not present on this instance** (`msdb` not restored) | **not present** (`msdb` not restored) |
+
+The FY2026 snapshot figures above were **confirmed identical on production itself** on 2026-10-05
+(2,267 / 99,890,944.67), so the restore is faithful.
+
+### 🛑 The local instance is NOT plan-equivalent to production — read before trusting a gate result
+
+| | Local restore | Production |
+|---|---|---|
+| Build | SQL Server 2022 **RTM, 16.0.1000.6** (no CU) | SQL Server 2022, `sqlapp\SQLEXPRESS` |
+| Edition | **Developer**, `EngineEdition` **3** | **Standard**, `EngineEdition` **2** |
+| `max server memory` | 2048 MB | — |
+| `cpu_count` | **12** | — |
+| instance `MAXDOP` / cost threshold | **12** / **5** | — |
+| DB compatibility level | 160 | — |
+
+🔴 **Two consequences, both load-bearing:**
+
+1. **`OPTION (MAXDOP 1)` is REQUIRED here or the gate hangs.** Measured 2026-10-05: materialising
+   `fn_FinanceLedgerAccessParity('2026')` into a temp table at the instance default (DOP 12) **stalled
+   for 11 minutes** on `CXSYNC_PORT` having done **2,293 logical reads and zero tempdb allocation** —
+   a parallel-exchange stall, not work, on an RTM build with known `CXSYNC_PORT` hangs. The identical
+   statement with `OPTION (MAXDOP 1)` completed in **12.3 s**. The gate materialises 26 such result
+   sets, so uncapped it will hang rather than take its documented ~70 s. Cap **both sides**, never one
+   — a one-sided cap introduces a plan asymmetry into the very comparison being made.
+2. 🔴 **Capping MAXDOP CHANGES FLOAT ADDITION ORDER, which is the subject of the open cent
+   disagreement** (see `financeupdatesepprogress.md`, 2026-10-05). So a MAXDOP-capped pass here is
+   **not** evidence that production passes uncapped, and a failure here is not evidence production
+   fails. **Production must be re-gated on production.** Treat this instance as the place to develop
+   and prove the comparison logic, not as a proxy for production's arithmetic.
 
 ---
 
@@ -118,16 +152,27 @@ SELECT 'UNSCOPED_2026' AS chk, COUNT(*) AS rows_, COUNT(DISTINCT AccountNumber) 
 FROM dbo.fn_OversightDraftUnscoped('2026');
 ```
 
-**PASS — these are the Access figures and the whole point of the release:**
+**PASS — these are the Access figures and the whole point of the release.** 🆕 **Re-measured
+2026-10-05 on the current restore (9.7 s, uncapped — the draft side does not stall).** Use the
+2026-10-05 column.
 
-| Check | Expected |
-|---|---|
-| SCOPED_2026 rows / alloc / approved | 14 · 7,548,334.91 · **346,568.08** |
-| UNSCOPED_2026 rows / accounts | **2275** · **2264** |
-| UNSCOPED_2026 alloc | 242,817,848.69 |
-| UNSCOPED_2026 ytd | 254,553,116.94 |
-| UNSCOPED_2026 approved | **83,803,914.38** |
-| UNSCOPED_2026 routing | 12,637,933.09 |
+| Check | 2026-09-29 | **2026-10-05 (current)** |
+|---|---|---|
+| SCOPED_2026 rows / alloc | 14 · 7,548,334.91 | **14 · 7,548,334.91** |
+| SCOPED_2026 approved | 346,568.08 | **428,008.08** |
+| UNSCOPED_2026 rows / accounts | 2275 · 2264 | **2278 · 2267** |
+| UNSCOPED_2026 alloc | 242,817,848.69 | **242,817,848.69** |
+| UNSCOPED_2026 ytd | 254,553,116.94 | **254,553,116.94** |
+| UNSCOPED_2026 approved | 83,803,914.38 | **88,092,538.18** |
+| UNSCOPED_2026 routing | 12,637,933.09 | **12,401,480.96** |
+
+**The shape of that drift is itself a check.** `alloc` and `ytd` are identical **to the cent** across
+the six days, while the encumbrance figures and the row counts moved. That is requisitions churning
+daily against an FY2026 GL that has not posted since — consistent with the posting-boundary rule, and
+what you should expect to see. If `ytd` or `alloc` ever moves between two runs days apart, that is a
+GL posting and worth knowing about, not drift to wave through.
+
+`2278 − 2267 = 11` split accounts, which is the FY2026 split count the next step asserts directly.
 
 ### Step 1.3 [DB] Create the parity function as a SCRATCH object
 
@@ -144,7 +189,12 @@ USE FinanceAutomationSystem;
 SET NOCOUNT ON;
 
 IF OBJECT_ID('tempdb..#p') IS NOT NULL DROP TABLE #p;
-SELECT * INTO #p FROM dbo.fn_FinanceLedgerAccessParity('2026');
+-- OPTION (MAXDOP 1) is not a tuning preference: at the local instance default
+-- (DOP 12) this statement stalls on CXSYNC_PORT for 11+ minutes having done
+-- ~2,300 logical reads. Capped, it is 12.3 s. See the plan-equivalence warning
+-- under "Confirmed starting state". Drop the hint when running on production,
+-- and record which way it was run.
+SELECT * INTO #p FROM dbo.fn_FinanceLedgerAccessParity('2026') OPTION (MAXDOP 1);
 
 -- 1. Shape: the function must return the snapshot's columns PLUS AccountID, and
 --    nothing else. AccountID is what Step 3.1 adds to the tables.
@@ -180,15 +230,27 @@ DROP TABLE #p;
 
 **PASS:**
 
-| Check | Expected |
-|---|---|
-| `SHAPE` | `fn_columns` **36**, `snapshot_columns` **35** |
-| `EXTRA_COLUMN` | exactly one row: **`AccountID`** — nothing else may appear |
-| `FY2026` rows / accts | **2275** · **2264** |
-| `FY2026` alloc / ytd | 242,817,848.69 · 254,553,116.94 |
-| `FY2026` approved / routing | **83,803,914.38** · 12,637,933.09 |
-| `SPLITS` | **11** |
-| `NO_COA_ROW` | exactly one row: `4-87800-E04-101-2004-00-000`, description **NULL**, segments `E04`/`101`/`2004`, approved **98,350.00** |
+🆕 **Re-measured 2026-10-05 (12.3 s, MAXDOP 1). ALL CHECKS PASSED.**
+
+| Check | 2026-09-29 | **2026-10-05 (current)** | |
+|---|---|---|---|
+| `SHAPE` | 36 / 35 | **36 / 35** | ✅ |
+| `EXTRA_COLUMN` | `AccountID` only | **`AccountID`** only | ✅ |
+| `MISSING_COLUMN` | *(not previously checked)* | **none** | ✅ |
+| `FY2026` rows / accts | 2275 · 2264 | **2278 · 2267** | |
+| `FY2026` alloc / ytd | 242,817,848.69 · 254,553,116.94 | **242,817,848.69 · 254,553,116.94** | |
+| `FY2026` approved / routing | 83,803,914.38 · 12,637,933.09 | **88,092,538.18 · 12,401,480.96** | |
+| `SPLITS` | 11 | **11** | ✅ |
+| `NO_COA_ROW` | one row, approved 98,350.00 | **one row: `4-87800-E04-101-2004-00-000`, description NULL, `E04`/`101`/`2004`, approved 98,350.00** | ✅ |
+
+🔑 **The check that matters most here is not in the table above:** the parity function's FY2026
+figures are **identical in all six values** to the draft's from step 1.2 — rows, accounts,
+allocation, YTD, approved and routing. Two independent implementations landing on the same six
+numbers is the substance of GATE 1 holding for FY2026, before the gate is run across all thirteen
+years.
+
+A `Warning: Null value is eliminated by an aggregate or other SET operation.` on this step is
+expected and benign — the monthly columns are NULL where a month has no activity.
 
 Two of these deserve a moment, because both look like defects and are not:
 
@@ -223,11 +285,144 @@ per-year table matching:
 | 2016 | 1,697 | 0 | | 2023 | 785 | 0 |
 | 2017 | 1,840 | 3 | | 2024 | 1,887 | 1 |
 | 2018 | 1,867 | 3 | | 2025 | 2,121 | 4 |
-| 2019 | 1,835 | 0 | | 2026 | 2,275 | 11 |
+| 2019 | 1,835 | 0 | | 2026 | **2,278** (was 2,275) | 11 |
 | 2020 | 1,882 | 0 | | | | |
 
 🛑 **STOP on any non-zero.** Nothing live has changed — fix the function and repeat 1.3–1.4.
 **Rollback:** `DROP FUNCTION dbo.fn_FinanceLedgerAccessParity;`
+
+---
+
+### ✅ GATE 1 FAILED TWICE ON A SINGLE CENT — RESOLVED 2026-10-06. Read this before re-running it.
+
+**It failed identically on two different machines, and the cause is NOT a defect. If you see this
+gate fail on one cent, do NOT "fix the function" — there is nothing wrong with it.** The fix was to
+the GATES (see the RESOLVED section below); the parity function was never changed. Full analysis in
+`financeupdatesepprogress.md` (2026-10-05, 2026-10-06).
+
+| Run | Instance | Parallelism | Elapsed | Verdict |
+|---|---|---|---|---|
+| 2026-09-29 | test instance | default | ~70 s | **PASS**, 0 differences |
+| 2026-10-05 | **production** `sqlapp\SQLEXPRESS` | default | — | **FAIL** 1/1 on FY2025 |
+| 2026-10-06 | local restore (Developer) | **MAXDOP 1** | **226.9 s** | **FAIL** 1/1 on FY2025 |
+
+Every run returns `mult_diffs = 0`, `years_with_rowcount_diff = 0`, `years_with_split_diff = 0` and
+twelve of thirteen years byte-identical. The failure is always the same **single row**:
+
+```
+FY2025  4-76100-H01-203-0251-00-000  FOOD SUPPLIES  H01/203/0251  AccountID 12480
+Feb   draft 818,966,030,193.12   parity ...93.11   delta -0.01
+Q2 and YTDTotal carry the same cent; they are not separate findings.
+```
+
+🔴 **It is float non-associativity, and the PARITY SIDE IS THE CORRECT ONE.** `NetChange` is
+`float`; both sides sum it as float (draft via `PIVOT`, parity via conditional `SUM`), so the two
+query forms add in different orders. February for that account is 1,208 rows including entries at
+1.77e12, where one ulp of a double is ~0.00024. Measured over those identical rows:
+
+| How summed | Result | Rounds to |
+|---|---|---|
+| **Exact (`decimal`) — the true value** | 818,966,030,193.**109965** | **.11** |
+| Production, default plan | …93.114746 | .11 |
+| Local, parallel (DOP 12) | …93.110107 | .11 |
+| **Local, `MAXDOP 1`** | …93.**115479** | **.12** |
+| Production, forced small-values-first | …93.109863 | .11 |
+| Production, forced large-values-first | …93.109253 | .11 |
+
+**Five different float answers for one set of rows, and `MAXDOP` alone flips the cent.** The exact
+value rounds to **.11**, which is what the parity function produces — **Access is the cent that is
+wrong.** The gate fails because the new function is *more accurate* than its reference.
+
+🔴 **The gate's own comparison reproduces it consistently — but the cent is not a fixed property of
+either function, and this is the subtlety that matters.** Across all three runs the gate's
+full-column comparison gives the draft `.12` and parity `.11`, on two different editions and at two
+different DOPs. Yet `sql/Gate1Diagnose_FY2025.sql` **Part 2**, which re-materialises the *same two
+functions* over a **reduced 9-column projection**, returned `draft_only 0, parity_only 0` — the
+`YTDTotal` cent **agreed** — in the same session, at the same `MAXDOP 1`, minutes later.
+
+That is the proof of what this is. SQL Server inlines these table-valued functions into the calling
+query, so **the surrounding projection changes the plan, which changes the addition order, which
+changes the cent.** The disagreement is a property of the *whole statement*, not of the parity
+logic. Consequences:
+
+- **No amount of tuning will make this gate pass**, and re-running it will not help.
+- **Narrowing the comparison to make it agree would be self-deception** — Part 2 agrees because it
+  compares fewer columns, not because the arithmetic improved.
+- A future "it passed this time" is luck, not a fix, and must not be treated as evidence.
+
+**Five accounts carry billion-scale entries** (all FY2025; two at 12,999,999,999,999.87, whose ulp
+of ~0.002 makes them *more* exposed than the one that actually failed — they pass by luck). So the
+gate is also **non-deterministic**: which account trips it can change between runs.
+
+#### How much money is actually at stake — measured, not assumed
+
+GATE 1 counts differing **rows**. "One row differs" is not the same claim as "the money differs by
+one cent", so `sql/ParityMoneyDelta.sql` was written to measure the money directly: each side
+materialised once per year, every figure converted to `decimal(19,2)` **per row** before summing so
+the comparison adds no float error of its own. Measured 2026-10-06, all thirteen years:
+
+| Figure | 13-FY total (draft) | Parity − draft |
+|---|---|---|
+| Allocation | 440,826,948.69 | **0.00** |
+| Approved | 353,219,050.22 | **0.00** |
+| Routing | 36,346,867.64 | **0.00** |
+| YTDTotal | 3,694,251,307.70 | **−0.01** (FY2025 only) |
+| Row count | — | **0 in every year** |
+
+`months_delta` shows the same **−0.01** because `YTDTotal` is derived from the months — one cent
+reported twice, which is why `total_abs` reads `0.02` rather than `0.01`. **The entire disagreement
+between the portal and the finance department's Access query is one cent in 3.69 billion
+(2.7e-12), and the portal is the correct side.**
+
+### ✅ RESOLVED 2026-10-06 — the money tolerance, and GATE 1 now PASSES
+
+Both gate scripts were changed. **They are read-only test harnesses: no data, no stored figure and
+no page changed.** What changed is only what the test calls a failure.
+
+- **Money columns compare at ≤ `@Tolerance` (default 0.01)**, and **every row that uses it is
+  printed** in a `TOLERATED` block naming account, column, both values and the delta, with a
+  summary carrying the largest delta seen and the tolerance in force. A tolerance you cannot see is
+  a blind spot; this one is a standing measurement.
+- **Grain is still EXACT** — row counts, per-grain-key multiplicity, split counts and the key
+  columns carry no tolerance whatever.
+- **The exact comparison is still computed and reported** per year as `exact_draft_only` /
+  `exact_parity_only`, so a bit-identical year still reads as bit-identical.
+- **A NULL-vs-value mismatch is never tolerated**, however small the implied delta — otherwise "no
+  activity" and "exactly zero" would silently merge.
+- **`@MaxDop`**: 0 on production, **1 on the local restore**. Applied to both sides or neither.
+- **`@Tolerance = 0` restores the old all-or-nothing behaviour** — verified, not assumed: at 0 the
+  FY2025 run returns `FAIL 1/1`, identical to before.
+
+GATE 1 was also rewritten from thirteen copy-pasted blocks into **one loop**, so the comparison
+exists once rather than thirteen times.
+
+**MEASURED 2026-10-06 — local restore, `@MaxDop 1`, `@Tolerance 0.01`, 191.5 s:**
+
+```
+VERDICT  total_draft_only 0  total_parity_only 0  total_tolerated_rows 1
+         total_exact_draft_only 1  total_exact_parity_only 1
+         total_multiplicity_diffs 0  years_with_rowcount_diff 0
+         years_with_split_diff 0   ->  PASS
+
+TOLERATED  FY2025  4-76100-H01-203-0251-00-000  (AccountID 12480, H01/203/0251)
+           Feb       818,966,030,193.12 -> ...93.11      -0.01
+           Q2      3,714,287,202,312.62 -> ...12.61      -0.01
+           YTDTotal        6,315,268.79 -> 6,315,268.78  -0.01
+```
+
+**Twelve of thirteen years are BIT-IDENTICAL** (`exact_draft_only 0`). FY2025 is the known float
+artifact, and the three cells are **one cent propagating** — `Q2` and `YTDTotal` are derived from
+`Feb` — not three defects.
+
+🔑 **How to read this gate from now on:** `PASS` with a small, named `TOLERATED` list is the
+expected healthy outcome. An **empty** `TOLERATED` list is stronger still (bit-identical
+everywhere). What must be investigated is the list **growing beyond the known float-artifact
+accounts**, or a delta **approaching 0.01 from below** — either means something other than
+representation is moving.
+
+**Do not deploy on the strength of this MAXDOP-capped local pass** — see the plan-equivalence
+warning under "Confirmed starting state". The cap changes the float addition order, so this run is
+not evidence about an uncapped one. **Production must be re-gated on production, with `@MaxDop 0`.**
 
 ---
 
