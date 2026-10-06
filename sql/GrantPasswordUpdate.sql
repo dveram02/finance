@@ -60,12 +60,30 @@ GO
 /*  ---------------------------------------------------------------------
     2. Verify. `must_be_zero` coming back as 1 means someone granted at
        table level by mistake — stop, REVOKE, and re-run step 1.
+
+    🔴 FIXED 2026-10-06 — THE ARGUMENTS WERE REVERSED. For a column-level
+       check the column NAME is the 4th argument and the literal 'COLUMN'
+       the 5th. This block previously passed 'COLUMN' 4th and the column
+       name 5th, and MEASURED CONSEQUENCE: every call returned NULL - not
+       1, not 0 - so `can_write_password` could never read 1 and the
+       verification could never pass. Do not "tidy" the order back.
+
+    🔴 AND IT ONLY MEANS ANYTHING RUN AS THE APPLICATION'S LOGIN.
+       HAS_PERMS_BY_NAME reports the CURRENT connection's rights. Measured
+       as dbo on the dev instance with the order corrected: ALL FOUR
+       returned 1, including the two that must read 0 - which reads as
+       "someone granted at table level, stop and REVOKE" when nothing is
+       wrong. Connect as the app's SQLSRV_USERNAME, or wrap this in
+       EXECUTE AS USER = N'<that user>' ... REVERT.
+
+       The query in section 3 below needs no impersonation - it names the
+       grantee explicitly - so prefer it when in any doubt.
     ---------------------------------------------------------------------  */
 
-SELECT  HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]', 'OBJECT', 'UPDATE', 'COLUMN', 'UserPassword') AS can_write_password,
-        HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]', 'OBJECT', 'UPDATE', 'COLUMN', 'LastEditedBy') AS can_write_editor,
-        HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]', 'OBJECT', 'UPDATE', 'COLUMN', 'IsActive')     AS must_be_zero,
-        HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]', 'OBJECT', 'UPDATE', 'COLUMN', 'PositionID')   AS must_also_be_zero;
+SELECT  HAS_PERMS_BY_NAME('dbo.0006AWebAppControls', 'OBJECT', 'UPDATE', 'UserPassword', 'COLUMN') AS can_write_password,
+        HAS_PERMS_BY_NAME('dbo.0006AWebAppControls', 'OBJECT', 'UPDATE', 'LastEditedBy', 'COLUMN') AS can_write_editor,
+        HAS_PERMS_BY_NAME('dbo.0006AWebAppControls', 'OBJECT', 'UPDATE', 'IsActive',     'COLUMN') AS must_be_zero,
+        HAS_PERMS_BY_NAME('dbo.0006AWebAppControls', 'OBJECT', 'UPDATE', 'PositionID',   'COLUMN') AS must_also_be_zero;
 GO
 
 SELECT  p.permission_name,

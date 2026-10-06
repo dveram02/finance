@@ -1197,17 +1197,64 @@ will correctly see empty pages).
 | Page | Check |
 |---|---|
 | Dashboard | KPIs render; Total Budget and YTD **unchanged** |
-| Budget Allocations | renders; the 11 split accounts appear **twice** in FY2026 |
+| Budget Allocations | renders — **but see FINDING 1: split accounts do NOT appear twice here** |
 | Monthly Expenditure | renders; totals row matches the sum over all pages |
-| Variance | renders; Excess / Balance up by ~850,193 in total |
-| **Encumbered Details** | **no year banner, no prev/next**; the **Fiscal Year** select is the first filter and is **OPTIONAL, opening on "All Fiscal Years"**; the gold period chip beside the title reads **"All available fiscal years"**; no `fy` in the URL and **no filter badge**; negative Extended Cost present; withheld years named under the select |
+| Variance | renders — **but see FINDING 2: the ~850,193 figure is NOT visible to any user** |
+
+#### 🔴 FINDING 1 (reviewed 2026-10-06) — "the 11 split accounts appear twice" is wrong twice over
+
+**On Budget Allocations they appear ONCE at most, never twice.** `vw_BudgetAllocation` filters
+`Allocation <> 0`, and a split puts the allocation on **one** of the two rows and the GL activity on
+the other. Measured on the rebuilt FY2026 snapshot: of the 11 split accounts, only **4** have a row
+with a non-zero allocation, and in each case only **one** of the pair carries it. So **4 appear once
+and 7 do not appear at all.**
+
+🔴 **And it cannot be checked in a browser regardless: `FFIGUERA1` sees ZERO split accounts.**
+Measured — 14 ledger rows across 14 distinct accounts, no duplicates, and 6 rows on Budget
+Allocations. None of the 11 splits falls in the one department that is mapped. **The headline
+behaviour of this release is invisible to the only user who can sign in.**
+
+**So verify splits in SQL, not in the browser** — step 3.4 already does it properly. The pages where
+a split *would* show twice are Monthly Expenditure and Variance, which read `vw_FinanceLedger`
+without the allocation filter — but only for a user whose departments contain one.
+
+#### 🔴 FINDING 2 (reviewed 2026-10-06) — the ~850,193 is a SNAPSHOT-WIDE figure, not a page total
+
+For **`FFIGUERA1` both Balance and Excess are UNCHANGED** — measured delta **0.00** on each, with
+the same 14 rows and unchanged YTD and Allocation. Nothing on that user's Variance page moves.
+
+The figure is the FY2026 **user-agnostic snapshot** delta: Balance **+850,193.91**
+(107,847,587.71 → 108,697,781.62) and Excess **+850,193.74** (119,582,856.13 → 120,433,049.87).
+It arises from split rows, which carry allocation and GL activity separately — so each split
+contributes to both Balance and Excess. **A verifier watching the Variance page for a ~850,193
+increase will see nothing move and report a correct build as a failure.** Check it in SQL against
+`_ParityBackup` instead.
+| **Encumbered Details** | **the `FiscalYearHero` banner IS present but DISPLAY-ONLY** — see the correction below; the **Fiscal Year** select is the first filter and is **OPTIONAL, opening on "All Fiscal Years"**; no `fy` in the URL and **no filter badge**; negative Extended Cost present; withheld years named under the select |
 | **Routing Details** | same, and no negatives (RT/HD/PN carry no shipments). Note it offers **noticeably fewer years** than Encumbered — 3 against 11 when measured — which is correct: the eligible set is route-specific |
 
-Also: arrow keys scroll table columns but **no longer step years** on those two pages, while the four
-banner pages still step years. Changing the year auto-applies and updates the URL.
+🆕 **CORRECTED 2026-10-06 — the two rows above described the `79eef8e` state and were already two
+revisions out of date.** Verified against `resources/js/Components/RequisitionDetailView.vue`:
 
-⚠️ **Two rows of this table were inverted until 2026-10-01**, and someone following them would have
-logged a correct build as a failure. Fiscal year became an **optional** filter on these two pages
+| This runbook used to say | What is actually built |
+|---|---|
+| "**no year banner**, no prev/next" | **The banner is BACK** (2026-10-02). `<FiscalYearHero … all-years-label="All Years" :controls="false">` — the same component the four summary pages use |
+| "the gold period chip beside the title reads *All available fiscal years*" | **The gold period chip is GONE.** `periodSpan` and `isCurrentFiscalYear` were deleted with it. The banner states the scope instead |
+
+So what to check is: the banner renders, its numeral slot reads **"All Years"** in words (not a year
+and not `—`), and the line beneath spans the **eligible** years — `Oct <earliest − 1> – Sep <latest>`.
+There is **no year rail and no prev/next stepper** (`:controls="false"`), because the Filters card
+already owns the fiscal year and two controls for one value would be able to disagree.
+
+⚠️ **Encumbered and Routing legitimately render the IDENTICAL span line** (`Oct 2013 – Sep 2026`)
+even though Routing offers only 3 eligible years against Encumbered's 11 — the span reports
+endpoints, and that was a deliberate decision. **Not a bug.**
+
+Also: arrow keys scroll table columns but **no longer step years anywhere in the app** — the
+app-wide removal on 2026-10-02 deleted `useFiscalYearNav.js`. The four summary pages still step
+years from the hero's own prev/next **buttons**. Changing the year auto-applies and updates the URL.
+
+⚠️ **Two further rows were inverted until 2026-10-01**, and someone following them would have logged
+a correct build as a failure. Fiscal year became an **optional** filter on these two pages
 (`routingupdate.md`), so:
 
 | Was | Now |
@@ -1215,9 +1262,10 @@ logged a correct build as a failure. Fiscal year became an **optional** filter o
 | "**required** Fiscal Year select" | optional, defaulting to All Fiscal Years |
 | "'Clear all' **keeps** the selected year" | **"Clear all" returns the year to All**, like every other filter — and a chosen year **counts in the filter badge** |
 
-Select a year and confirm the chip reads `FY 2026 · Oct 2025 – Sep 2026` with the badge at 1, then
-"Clear all" and confirm it returns to "All available fiscal years" with no badge and no `fy` in the
-URL. **No year shows "Current"** — the current FY is 2027 and the newest selectable year is 2026.
+Select a year and confirm the banner switches from "All Years" to `2026` with its single-year span
+and the badge at 1, then "Clear all" and confirm it returns to "All Years" with no badge and no `fy`
+in the URL. **No year shows "Current"** — the current FY is **2027** (today is in October) and the
+newest selectable year is 2026.
 
 ### Step 5.6 [WEB] [VERIFY] Exports
 
@@ -1241,7 +1289,25 @@ have.
 
 New with `routingupdate.md`. The all-years default means the read is bounded by
 `FINANCE_REQUISITION_ROW_CEILING` (default 25,000) rather than by one fiscal year. It is unreachable
-with real data today — 416 rows for the only mapped user — so it is verified by lowering the ceiling.
+with real data today, so it is verified by lowering the ceiling.
+
+🆕 **Re-measured 2026-10-06 after the rebuild** (the "416 rows" above was 2026-10-01):
+
+| For `FFIGUERA1` | Encumbered (AP/PO) | Routing (RT/HD/PN) |
+|---|---|---|
+| Lines, all years | **460** | **56** |
+| Negative `ExtendedCost` | **8** | **0** |
+| Eligible fiscal years | **11** (2014–2026, no 2022/2023) | **3** (2026, 2021, 2014) |
+| Withheld years named under the select | **3** — 2013, 2012, 2011 | none |
+
+460 against a 25,000 ceiling, so the refusal is still unreachable without lowering it. These also
+confirm step 5.5's "negative Extended Cost present" / "no negatives on Routing" and the 11-vs-3 year
+asymmetry — all three hold.
+
+⚠️ **`Status` and `StatusName` are different columns and only `Status` carries the codes.**
+`StatusName` holds words — `APPROVED`, `PURCHASE ORDER`, `ROUTING`. A hand-written check using
+`StatusName IN ('AP','PO')` returns **zero rows** and looks like missing data. Step 4.5's query is
+right because it uses `Status`.
 
 ```
 # In .env on the WEB server, then: php artisan config:clear
@@ -1286,8 +1352,25 @@ the grant is cut to match that permission precisely and nothing wider.
 other pre-existing table, may be written** — see the hard rule in `CLAUDE.md`. If a future change
 appears to need a fifth column, that is a design error, not a grant to widen.
 
-**Confirm the production login name before granting.** Dev uses `finance`; production's
-`SQLSRV_USERNAME` must be checked, because granting to the wrong principal fails **silently**.
+**Confirm the production login name before granting.** Production's `SQLSRV_USERNAME` must be
+checked, because granting to the wrong principal fails **silently**.
+
+🔴 **FINDING 5 (reviewed 2026-10-06) — "Dev uses `finance`" is WRONG, and the consequence matters.**
+Measured on the dev instance: `.env` has **`SQLSRV_USERNAME=bramkissoon`**, which maps to **`dbo`**
+in `SWRHAExpenseControl`. A `finance` principal does exist, but the application does not connect as
+it.
+
+**So the dev machine cannot validate this grant at all.** As `dbo` the app has blanket rights, so a
+password change will succeed on dev **whether or not the column grant exists** — and a successful
+dev test is therefore no evidence that the production grant is correct or correctly scoped. Treat
+Steps 5.8–5.11 as **verifiable only on production**, against the real `SQLSRV_USERNAME`, and read
+FINDING 4 before interpreting Step 5.10.
+
+```sql
+-- Run this on PRODUCTION and use the answer, not the name in this runbook.
+SELECT name, type_desc FROM sys.database_principals
+WHERE name = N'<the production SQLSRV_USERNAME>';
+```
 
 Nothing else in the release depends on this step. The application ships with the feature switched
 off and works normally without the grant, so it can be deferred without holding anything up.
@@ -1323,11 +1406,18 @@ column-level grant makes that impossible at the database rather than by code rev
 
 ### Step 5.10 [DB] [VERIFY] Confirm the grant is exactly four columns
 
+🔴 **FINDING 3 (reviewed 2026-10-06) — the `HAS_PERMS_BY_NAME` calls below had their ARGUMENTS
+REVERSED, and the documented PASS was unachievable.** The column **name** is the 4th argument and
+the literal `'COLUMN'` the 5th; the old form passed `'COLUMN','UserPassword'`. **Measured: every
+call returned `NULL`** — not 1, not 0 — so `pw`/`editor` could never read 1 and the step could never
+pass. The same reversal is in **`sql/GrantPasswordUpdate.sql`** (its verification block) and must be
+fixed there too. Corrected below:
+
 ```sql
-SELECT HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','UserPassword') AS pw,
-       HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','LastEditedBy') AS editor,
-       HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','IsActive')     AS must_be_zero,
-       HAS_PERMS_BY_NAME('dbo.[0006AWebAppControls]','OBJECT','UPDATE','COLUMN','PositionID')   AS must_also_be_zero;
+SELECT HAS_PERMS_BY_NAME('dbo.0006AWebAppControls','OBJECT','UPDATE','UserPassword','COLUMN') AS pw,
+       HAS_PERMS_BY_NAME('dbo.0006AWebAppControls','OBJECT','UPDATE','LastEditedBy','COLUMN') AS editor,
+       HAS_PERMS_BY_NAME('dbo.0006AWebAppControls','OBJECT','UPDATE','IsActive','COLUMN')     AS must_be_zero,
+       HAS_PERMS_BY_NAME('dbo.0006AWebAppControls','OBJECT','UPDATE','PositionID','COLUMN')   AS must_also_be_zero;
 
 SELECT p.permission_name, p.state_desc, c.name AS column_name
 FROM   sys.database_permissions p
@@ -1337,10 +1427,25 @@ WHERE  p.major_id = OBJECT_ID('dbo.[0006AWebAppControls]')
 ORDER  BY c.name;
 ```
 
-**PASS:** `pw` and `editor` are **1**, both `must_be_zero` columns are **0**, and the second query
-returns **exactly four rows** — one per granted column — and no table-level row.
+🔴 **FINDING 4 — the first query is only meaningful run AS THE APPLICATION'S LOGIN.**
+`HAS_PERMS_BY_NAME` reports the **current** connection's rights. Measured as `dbo` on the dev
+instance with the corrected argument order: **all four returned 1**, including both columns that
+must read 0 — which reads as "someone granted at table level. Stop, `REVOKE`" when nothing is wrong
+at all. Run it in a session connected as the app's `SQLSRV_USERNAME`, or with
+`EXECUTE AS USER = N'<that user>'` … `REVERT` around it. (On the dev instance even that fails —
+`Msg 15517`, the `finance` user cannot be impersonated — which is part of FINDING 5.)
 
-A `must_be_zero` of 1 means someone granted at table level. **Stop, `REVOKE`, and re-run Step 5.9.**
+**The SECOND query is the trustworthy one** and needs no impersonation: it names the grantee
+explicitly via `DATABASE_PRINCIPAL_ID('finance')`. Measured on dev it returns **0 rows**, correctly
+reflecting that the grant has not been applied.
+
+**PASS:** `pw` and `editor` are **1**, both `must_be_zero` columns are **0** — *when run as the
+application's login* — and the second query returns **exactly four rows**, one per granted column,
+with no table-level row.
+
+A `must_be_zero` of 1 **when run as the app login** means someone granted at table level.
+**Stop, `REVOKE`, and re-run Step 5.9.** A `must_be_zero` of 1 when run as `dbo`/sysadmin means
+nothing — re-run it as the right principal before reacting.
 
 ### Step 5.11 [WEB] Enable the feature and verify it end to end
 
