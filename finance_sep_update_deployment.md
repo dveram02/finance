@@ -1516,12 +1516,33 @@ row from the same run.
 
 ### Step 6.2 [WEB] [VERIFY] Health check
 
+🔴 **FINDING 6 (reviewed 2026-10-06) — this step used to carry
+`SQLSRV_HOST=127.0.0.1`, which is a DEV-MACHINE override and is WRONG on production.** On the
+production web server `SQLSRV_HOST` must stay at its `.env` value — the **remote DB server**. It is
+never `localhost`, even though a SQL instance may also exist on the web box. Pointed at `127.0.0.1`
+there, the health check reports on the wrong instance or fails outright, and the failure reads as a
+deployment problem.
+
 ```bash
+# ON PRODUCTION - no override. Use .env's SQLSRV_HOST.
+php artisan ledger:status
+```
+
+```bash
+# ON THE DEV MACHINE ONLY, where SQL Server is native and .env points at
+# host.docker.internal for the Docker app:
 SQLSRV_HOST=127.0.0.1 php artisan ledger:status
 ```
 
 **PASS:** exits **0**, and reports both snapshots as fresh and **from the same run**. A non-zero exit
 means either a stale snapshot or drift between the two — both are stop conditions.
+
+🔑 **This is the single most valuable check in the whole runbook**, because it is the only one that
+detects the two snapshots being from *different nights* — which no other check can see, and which
+the Agent job's own error reporting cannot tell you about. Note the threshold comes from
+`ledger.requisition.max_age_hours` (36h) and the drift allowance from
+`ledger.requisition.max_run_drift_minutes`; both are overridable per run via `--max-age-hours` and
+`--max-drift-minutes`.
 
 ### Step 6.3 [DB] Drop the scratch objects — only after sign-off
 
