@@ -10,6 +10,52 @@ change). Read this before believing any status claim elsewhere, including the pl
 
 ---
 
+## 🆕 DEPLOYED TO PRODUCTION — 2026-10-06. All three gates passed.
+
+**The whole September release is live.** Eight queued changes shipped in one window: Access parity,
+Phase 3's two drill-down pages, the 7→6 rename, CSV export, FY-optional drill-downs with the row
+ceiling, the display-only banner, the self-service password change, and the Privacy/Terms removal.
+**Production serves parity figures.**
+
+| Gate | Result on production |
+|---|---|
+| **GATE 1** — logic | **PASS** |
+| **GATE 2** — stored data, all 13 years | **PASS**, `years_failing 0` |
+| **GATE 3** — the two snapshots agree | **PASS** — `ReconMismatches 0`, `ReconStaleYearDrift 0`, `ReconAccountsCompared 22,354`, `RowsLoaded 109,256` |
+| Step 4.5 — detail ties to summary | **EXACT** — approved `428,008.08 = 428,008.08`, routing `204,709.08 = 204,709.08` |
+| FY2026 negatives arrived | 674 lines / 59 accounts / **−17,265,069.60** (0 before the cutover) |
+| Pre-deploy suite, parity data | **352 passed, 7 skipped, 0 failed, 3,402 assertions** |
+
+🔑 **Production matched the local rehearsal digit for digit** — every row count, split count, per-year
+`max_abs_delta` and the 20099/20087/40186 totals at step 3.3. The 05-10 restore was a faithful dry run,
+which is the strongest thing that can be said for a rehearsal.
+
+**`ReconStaleYearDrift` went 9 → 0**, confirming the deliberate phase ordering: rebuilding all
+thirteen years *before* the requisition cutover is what brings every year inside the 36-hour window.
+
+**Money moved as predicted.** FY2026 `Approved` 99,890,944.67 → **88,092,538.18**; FY2017 and FY2018
+**negative** at −3,974,133.73 / −1,444,587.97, matching the 2026-09-30 forecasts **to the cent**
+because closed years do not drift; requisition `TotalApproved` 444,594,701.39 → 362,698,460.83.
+
+**`master` was fast-forwarded** to `feature/ledger-oversight-update` the same day (20 commits, at the
+user's request). Local only — nothing pushed.
+
+### Outstanding after go-live
+
+- 🔴 **No monitoring.** Still unregistered, now guarding a release that changed every money figure and
+  added new abort conditions. **The most urgent open item.**
+- **`Overview.md` not rewritten** — splits, negative encumbrances and changed account descriptions
+  will be reported as portal bugs without it.
+- **Finance sign-off on FY2026 against Access** — then step 6.3. Keep
+  `fn_FinanceLedgerAccessParity`, both draft functions and all four `_ParityBackup` tables until one
+  period close, **with a named owner and a date**.
+- **The 1st-of-month Agent branch has never run on parity code** — first exercise **1 November 2026**.
+- **Browser and Excel verification outstanding** since 2026-08-29, and note that **splits cannot be
+  browser-verified at all** (`FFIGUERA1` sees none).
+- **`sql/ParityReconciliation.sql` lacks the money tolerance** and will fail on the known cent.
+
+---
+
 ## Status at a glance
 
 | # | Workstream | State |
