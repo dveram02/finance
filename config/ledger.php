@@ -131,6 +131,40 @@ return [
         'max_age_hours' => (int) env('FINANCE_REQUISITION_MAX_AGE_HOURS', 36),
 
         /*
+        | ── Grace period for a BRAND-NEW fiscal year (added 2026-10-07) ─────
+        |
+        | `ledger:status` asserts that the CURRENT fiscal year has been built,
+        | and the current year comes from the clock: FY2027 begins on
+        | 1 Oct 2026. But the refresh enumerates fiscal years FROM THE SOURCE
+        | (0098AFinGLMaster UNION 0040CBudgetsAllocation) rather than from a
+        | calendar range, so a year with no source rows is never attempted and
+        | never logged.
+        |
+        | MEASURED 2026-10-07, one day after go-live: FY2027 had 0 rows in both
+        | source tables, the latest GL posting of ANY year was 2026-08-31, and
+        | `ledger:status` reported "CRITICAL: fiscal year 2027 has never been
+        | built" while the nightly job had in fact run correctly and succeeded.
+        |
+        | 🔴 THAT IS THE FAILURE MODE THAT KILLS MONITORING. Left alone the
+        | check would alert every day from 1 October until FY2027 data appears -
+        | possibly weeks - and an alarm that cries wolf for weeks gets muted,
+        | after which the real stoppage is silent too. Worse than no check.
+        |
+        | So a missing current year is treated as EXPECTED while BOTH hold:
+        | the source has no rows for it, AND the fiscal year is less than this
+        | many days old. Freshness is then asserted against the newest year that
+        | WAS built, so a genuinely stopped scheduler still alarms.
+        |
+        | Past the grace period a dataless current year becomes CRITICAL again,
+        | because by then it means nobody ever loaded the allocations - which is
+        | a real problem that would otherwise stay quiet forever. 90 days runs
+        | to the end of December.
+        |
+        | Set to 0 to restore the old unconditional CRITICAL.
+        */
+        'current_year_grace_days' => (int) env('FINANCE_CURRENT_YEAR_GRACE_DAYS', 90),
+
+        /*
         | ── Bounded-fetch guard (routingupdate.md §6) ──────────────────────
         |
         | Since 2026-10-01 the fiscal year is an OPTIONAL filter on the two

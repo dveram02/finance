@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\CurrentYearGrace;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,7 @@ class LedgerStatus extends Command
     protected $signature = 'ledger:status
                             {--max-age-hours= : Age at which a snapshot is considered stale; defaults to ledger.requisition.max_age_hours}
                             {--max-drift-minutes= : Allowed gap between the ledger and requisition refresh times (default: config)}
+                            {--current-year-grace-days= : Days into a new fiscal year that a MISSING current year is tolerated while the source holds no rows for it; defaults to ledger.requisition.current_year_grace_days, 0 disables}
                             {--json : Output raw JSON instead of a table}';
 
     protected $description = 'Report finance ledger and requisition snapshot freshness; exit non-zero if stale';
@@ -51,6 +53,10 @@ class LedgerStatus extends Command
             ?: config('ledger.requisition.max_age_hours'));
         $maxDrift = (int) ($this->option('max-drift-minutes')
             ?: config('ledger.requisition.max_run_drift_minutes'));
+        // `??`, not `?:` — an explicit `--current-year-grace-days=0` must mean
+        // ZERO (restore the unconditional CRITICAL), not "fall back to config".
+        $graceDays = (int) ($this->option('current-year-grace-days')
+            ?? config('ledger.requisition.current_year_grace_days'));
 
         // ── Ledger ───────────────────────────────────────────────────────────
         try {
@@ -86,6 +92,49 @@ class LedgerStatus extends Command
 
         $ledgerRefreshedAt = $rows->where('Outcome', 'OK')->max('RefreshedAt');
 
+        // A MISSING current fiscal year is not automatically a failure, and
+        // getting this wrong is how monitoring dies. The refresh enumerates
+        // fiscal years FROM THE SOURCE, not from a calendar range, so a year
+        // that has started but holds no source rows yet is never attempted and
+        // never logged — while this command derives the current year from the
+        // clock. Measured 2026-10-07, one day after go-live: FY2027 had zero
+        // rows in both source tables and this command reported CRITICAL while
+        // the nightly job had run correctly.
+        //
+        // So the absence is benign only when BOTH hold: the source genuinely
+        // has nothing for that year, AND the year is still inside the grace
+        // window. Past the window it means nobody loaded the allocations, which
+        // is a real problem that would otherwise never surface.
+        //
+        // 🔴 Fails CLOSED: if the source probe itself throws, sourceRows is
+        // null and the year is treated as a genuine failure. "We could not
+        // establish that this is benign" must never read as benign.
+        $currentFyExpectedEmpty = false;
+        $currentFySourceRows = null;
+
+        if ($current === null) {
+            $currentFySourceRows = $this->sourceRowCountForYear($currentFy);
+            $currentFyExpectedEmpty = CurrentYearGrace::isExpectedlyAbsent(
+                $currentFySourceRows,
+                CurrentYearGrace::ageInDays($currentFy),
+                $graceDays,
+            );
+        }
+
+        // What freshness is actually asserted against. Normally the current
+        // year; when that year is legitimately absent, the newest year that WAS
+        // built — otherwise skipping the check would also skip the stopped-
+        // scheduler detection, which is the whole point of this command.
+        $assertedAgeHours = $ageHours;
+        $assertedLabel = "FY{$currentFy}";
+
+        if ($current === null && $currentFyExpectedEmpty) {
+            $assertedAgeHours = $ledgerRefreshedAt
+                ? round(Carbon::parse($ledgerRefreshedAt)->diffInHours(now()), 1)
+                : null;
+            $assertedLabel = 'the newest built fiscal year';
+        }
+
         // ── Requisition detail (Phase 2) ─────────────────────────────────────
         $req = $this->requisitionState($ledgerRefreshedAt, $maxAge);
 
@@ -98,7 +147,16 @@ class LedgerStatus extends Command
                 'maxAgeHours' => $maxAge,
                 'rowsLoaded' => $current->RowsLoaded ?? null,
                 'abortedYears' => $aborted->pluck('FinancialYear')->all(),
-                'stale' => $current === null || $ageHours > $maxAge,
+                // `stale` follows the ASSERTED age, so a legitimately absent
+                // current year does not report stale while the newest built
+                // year is fresh. The three fields below are what let a consumer
+                // tell that case apart from a real gap.
+                'stale' => $assertedAgeHours === null || $assertedAgeHours > $maxAge,
+                'assertedAgainst' => $assertedLabel,
+                'assertedAgeHours' => $assertedAgeHours,
+                'currentFiscalYearMissingButExpected' => $currentFyExpectedEmpty,
+                'currentFiscalYearSourceRows' => $currentFySourceRows,
+                'currentYearGraceDays' => $graceDays,
                 'requisition' => $req + ['maxDriftMinutes' => $maxDrift],
             ], JSON_PRETTY_PRINT));
         } else {
@@ -123,14 +181,29 @@ class LedgerStatus extends Command
         }
 
         // ── Verdicts, most severe first ──────────────────────────────────────
-        if ($current === null) {
-            $this->error("CRITICAL: fiscal year {$currentFy} has never been built.");
+        if ($current === null && ! $currentFyExpectedEmpty) {
+            $this->error($currentFySourceRows === null
+                ? "CRITICAL: fiscal year {$currentFy} has never been built, and the source could not be checked to establish whether that is expected."
+                : "CRITICAL: fiscal year {$currentFy} has never been built, and the source holds {$currentFySourceRows} row(s) for it. Run: php artisan ledger:refresh --year={$currentFy}");
 
             return self::FAILURE;
         }
 
-        if ($ageHours > $maxAge) {
-            $this->error("CRITICAL: FY{$currentFy} snapshot is {$ageHours}h old (limit {$maxAge}h). The scheduler is probably not running.");
+        if ($current === null) {
+            // Benign, but SAY SO on every run. A silently skipped assertion is
+            // indistinguishable from a passing one, and this is the line that
+            // explains why the table has no row for the current year.
+            $this->warn("FY{$currentFy} has not been built, and the source holds no rows for it yet — expected this early in a fiscal year (grace {$graceDays} days). Freshness asserted against the newest built year instead.");
+        }
+
+        if ($assertedAgeHours === null) {
+            $this->error('CRITICAL: no fiscal year has a successful refresh. Run: php artisan ledger:refresh --all');
+
+            return self::FAILURE;
+        }
+
+        if ($assertedAgeHours > $maxAge) {
+            $this->error("CRITICAL: {$assertedLabel} snapshot is {$assertedAgeHours}h old (limit {$maxAge}h). The scheduler is probably not running.");
 
             return self::FAILURE;
         }
@@ -198,7 +271,12 @@ class LedgerStatus extends Command
             return self::FAILURE;
         }
 
-        $this->info("OK: FY{$currentFy} snapshot is {$ageHours}h old ({$current->RowsLoaded} rows).");
+        // $current may legitimately be null here — a brand-new fiscal year with
+        // no source data yet, which the verdict above reported as expected. The
+        // success line therefore has two shapes rather than dereferencing it.
+        $this->info($current !== null
+            ? "OK: FY{$currentFy} snapshot is {$ageHours}h old ({$current->RowsLoaded} rows)."
+            : "OK: {$assertedLabel} snapshot is {$assertedAgeHours}h old. FY{$currentFy} is not built yet and has no source data — see the note above.");
 
         return self::SUCCESS;
     }
@@ -218,6 +296,46 @@ class LedgerStatus extends Command
      *
      * @return array<string,mixed>
      */
+    /**
+     * How many source rows exist for a fiscal year — null if it cannot be read.
+     *
+     * This mirrors the year enumeration inside
+     * usp_RefreshFinanceLedgerSnapshotAll, which builds its list from
+     * 0098AFinGLMaster UNION 0040CBudgetsAllocation. That is WHY a started-but-
+     * dataless fiscal year is never built: it is not in the source, so it is
+     * never in the list. Keep the two in step — if the proc's enumeration ever
+     * gains a third table, this must gain it too, or this command will call a
+     * genuinely missing year "expected".
+     *
+     * 🔴 Returns NULL on any error rather than 0. A failed probe must never be
+     * mistaken for "the year is legitimately empty" — that would turn the
+     * stopped-scheduler alarm off on the strength of a connection blip. The
+     * caller treats null as a genuine failure.
+     *
+     * Both tables are PRE-EXISTING and belong to other systems: this reads
+     * them and nothing more.
+     */
+    private function sourceRowCountForYear(string $fy): ?int
+    {
+        try {
+            $db = DB::connection('FinanceAutomationSystem');
+
+            $gl = (int) $db->table('0098AFinGLMaster')
+                ->where('FinancialYear', $fy)
+                ->count();
+
+            if ($gl > 0) {
+                return $gl;
+            }
+
+            return $gl + (int) $db->table('0040CBudgetsAllocation')
+                ->where('FinancialYear', $fy)
+                ->count();
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     private function requisitionState(?string $ledgerRefreshedAt, int $maxAge): array
     {
         try {
