@@ -73,20 +73,6 @@ const submit = () => {
           <div class="relative overflow-hidden rounded-[2rem] border border-white/40 bg-slate-950 shadow-2xl shadow-slate-950/25 dark:border-white/10">
             <img src="/images/bg-login.png" alt="" class="h-72 w-full object-cover opacity-85" />
             <div class="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-950/45 to-transparent"></div>
-            <div class="absolute bottom-0 left-0 right-0 grid grid-cols-3 gap-px bg-white/10 p-px">
-              <div class="bg-white/10 p-5 backdrop-blur-md">
-                <p class="text-xs uppercase tracking-[0.25em] text-cyan-100/80">Period</p>
-                <p class="mt-2 text-2xl font-semibold text-white">FY</p>
-              </div>
-              <div class="bg-white/10 p-5 backdrop-blur-md">
-                <p class="text-xs uppercase tracking-[0.25em] text-cyan-100/80">Mode</p>
-                <p class="mt-2 text-2xl font-semibold text-white">Live</p>
-              </div>
-              <div class="bg-white/10 p-5 backdrop-blur-md">
-                <p class="text-xs uppercase tracking-[0.25em] text-cyan-100/80">Access</p>
-                <p class="mt-2 text-2xl font-semibold text-white">SSO</p>
-              </div>
-            </div>
           </div>
         </section>
 
