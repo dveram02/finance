@@ -3,21 +3,88 @@
 A plain-language reference for explaining to the Finance department **what each screen shows** and
 **exactly how every number on it is produced**.
 
-Written 2026-08-06. Where this document and the code disagree, the code wins — but every figure
-below was read off the current source.
+Written 2026-08-06. **Revised 2026-10-07** for the release that went live on 6 October 2026. Where
+this document and the code disagree, the code wins — but every figure below was read off the current
+source.
+
+---
+
+## ⚠️ READ FIRST — what changed on 6 October 2026, and why your numbers moved
+
+A release went live on **6 October 2026** that deliberately changed how three things are reported.
+**All three were intended. None is a fault in the portal.** They are listed here first because each
+one looks like a bug until it is explained.
+
+### 1. Committed money can now be NEGATIVE
+
+`Approved` and `Routing` are the value of requisitions that have been raised but not yet posted to
+the GL — and they are counted **net of goods already received**. Previously, if a line had received
+*more* than it ordered, the portal clamped that line to zero.
+
+It no longer does. **An over-received line now shows as a negative commitment**, because that is what
+the Finance department's own Access query reports, and the portal's job is to agree with it.
+
+What you will see as a result:
+
+- **FY2026 `Approved` fell from 99,890,944.67 to 88,092,538.18** — about 11.8M. No money was lost;
+  over-received value that used to be hidden at zero is now subtracted.
+- **FY2017 and FY2018 show a NEGATIVE total `Approved`** (−3,974,133.73 and −1,444,587.97). Those two
+  years hold more over-received value than open commitment, so the whole-year total goes below zero.
+- On **Encumbered Details** you will see individual lines with a negative *Extended Cost* and a
+  negative *Quantity*. The quantity column is the **unshipped balance**, not the order quantity, so
+  an over-received line is negative in both.
+
+### 2. Some accounts now appear on TWO rows
+
+An account's description is recorded in two places that do not always agree — the GL and the chart of
+accounts. Where the two spellings differ, the account now appears **twice**, once under each
+spelling, with its money split between them.
+
+The worked example is real: `4-87300-C20-101-2004-00-000` appears as **`RENT & ACCOMODATION`** (one
+M, carrying 253,000.00 of GL spend) *and* **`RENT & ACCOMMODATION`** (two Ms, carrying 521,336.04 of
+allocation and 138,000.00 of commitment).
+
+**Neither row is a duplicate, and no money is double-counted** — the totals are unchanged; it is the
+same money shown at a finer grain. Eleven FY2026 accounts behave this way. Again, this reproduces the
+Finance department's own query exactly.
+
+A consequence worth knowing: on **Budget Allocations** a split account usually appears **once**, not
+twice, because that page only lists accounts that carry a budget allocation and the allocation sits on
+one of the two rows.
+
+### 3. A few account descriptions are now blank
+
+Descriptions are taken exactly as the source records them for each row, rather than being filled in
+from a fallback. One FY2026 account (`4-87800-E04-101-2004-00-000`) is absent from the chart of
+accounts altogether, so **its description renders blank** instead of the old `UNDEFINED`. Its segment
+labels still resolve, and its money is unaffected.
+
+### What did NOT change
+
+**Allocation and posted GL spend are the same figures as before** — total `Allocation` moved by
+**£0.17** and `YTDTotal` by **£0.01** across thirteen years, both rounding artifacts of the source
+data being stored as floating-point numbers, not changes to anyone's budget.
+
+> **If a figure looks wrong, the fastest check is this:** does it involve `Approved`, `Routing`, a
+> duplicated account name, or a blank description? If so, see above. If it involves `Allocation` or
+> month-by-month GL spend, those have not changed and it is worth reporting.
 
 ---
 
 ## Table of contents
 
+0. ⚠️ [**What changed on 6 October 2026, and why your numbers moved**](#️-read-first--what-changed-on-6-october-2026-and-why-your-numbers-moved) — read this before reporting a figure as wrong
 1. [How the data gets to the screen (read this first)](#1-how-the-data-gets-to-the-screen)
 2. [Rules that apply to every view](#2-rules-that-apply-to-every-view)
 3. [Dashboard](#3-dashboard-dashboard)
 4. [Budget Allocations](#4-budget-allocations-budget-allocations)
 5. [Monthly Expenditure](#5-monthly-expenditure-monthly-expenditure)
 6. [Variance](#6-variance-variance)
-7. [Login and Profile](#7-login-and-profile)
-8. [Frequently asked questions](#8-frequently-asked-questions)
+7. 🆕 [Encumbered Details](#7-encumbered-details-encumbered-details)
+8. 🆕 [Routing Details](#8-routing-details-routing-details)
+9. 🆕 [Exporting to CSV](#9-exporting-to-csv)
+10. [Login and Profile](#10-login-and-profile)
+11. [Frequently asked questions](#11-frequently-asked-questions)
 
 ---
 
@@ -57,25 +124,44 @@ For a single account in a single fiscal year:
 | `Q1`–`Q4` | Quarter totals | Oct+Nov+Dec, Jan+Feb+Mar, Apr+May+Jun, Jul+Aug+Sep |
 | `YTDTotal` | Year-to-date posted spend | Sum of all 12 month columns |
 | `Allocation` | Approved budget | `SUM(Allocation)` from `0040CBudgetsAllocation` for that FY |
-| `Approved` | Committed — approved requisitions, **net of goods received** | `SUM((Quantity - QtyShipped) * UnitCost)` where `Status IN ('AP','PO')`, floored at zero |
-| `Routing` | Committed — in-flight requisitions, **net of goods received** | `SUM((Quantity - QtyShipped) * UnitCost)` where `Status IN ('RT','HD','PN')`, floored at zero. Displayed only — does not reduce the allocation balance |
+| `Approved` | Committed — approved requisitions, **net of goods received** | `SUM((Quantity - QtyShipped) * UnitCost)` where `Status IN ('AP','PO')`. 🆕 **NOT floored at zero since 6 Oct 2026** — an over-received line is negative |
+| `Routing` | Committed — in-flight requisitions, **net of goods received** | `SUM((Quantity - QtyShipped) * UnitCost)` where `Status IN ('RT','HD','PN')`. 🆕 **Not floored either.** Displayed only — does not reduce the allocation balance |
 | `ClusterName`, `InstitutionName`, `ResponsibilityName`, `DepartmentName` | Labels | Parsed out of the account number's segments, then named from the segment tables |
 | `MainGroup`, `SubGroupA`, `SubGroupB` | Category | Split out of the reporting line description (`A : B : C`) |
 
 ### The three derived columns (computed in `vw_FinanceLedger`, not stored)
 
+🆕 **CORRECTED 2026-10-07. This section previously described the pre-August-2026 rule and was wrong
+in a way that mattered** — it said commitments reduce the balance. They do not. Read off the live
+view definition:
+
 ```
-ActualExpenditure = YTDTotal + Approved + Routing
-Excess            = ABS(Allocation - ActualExpenditure)  when that is negative, else 0
-AllocationBalance =     (Allocation - ActualExpenditure)  when that is positive, else 0
+ActualExpenditure = YTDTotal + Approved                       (Routing is NOT included)
+Excess            = YTDTotal - Allocation   when that is positive, else 0
+AllocationBalance = Allocation - YTDTotal   when that is positive, else 0
 ```
 
-**Why commitments count.** Money sitting on an approved or routing requisition is no longer
-available to spend. Measuring balance against posted GL alone would overstate every line's headroom.
+**Only POSTED GL spend reduces the balance.** Both `Excess` and `AllocationBalance` are measured
+against `YTDTotal` **alone** — not against `ActualExpenditure`, and not against commitments. This
+changed on 25 August 2026 to match `SQL Revised Allocation Oversight F`, the Finance department's own
+query.
 
-**Why the balance floors at zero.** An overspent line contributes `0` balance and reports the
+**So what are `Approved` and `Routing` for?** They are **reported, not deducted**:
+
+- `Approved` is added into `ActualExpenditure`, so that figure shows total exposure — spent plus
+  committed.
+- `Routing` is **shown and deducted from nothing at all**. It is in-flight work that may still change.
+- Neither touches `AllocationBalance`. A line with budget left and a large approved requisition will
+  still show that headroom as available, because the money has not yet left the GL.
+
+**Why the balance still floors at zero.** An overspent line contributes `0` balance and reports the
 overspend separately as `Excess`. If a negative balance were allowed, one overspent account would
-cancel out another account's genuine headroom in a totals row and overstate available funds.
+cancel out another account's genuine headroom in a totals row and overstate available funds. The two
+columns are mutually exclusive — exactly one of them is non-zero on any given row.
+
+> 🔴 **Note the two floors are different things, and only one of them was removed in October.** The
+> **balance** floor above is intact. The floor that was removed was on **commitments** (`Approved` /
+> `Routing`) — see "what changed" at the top of this document.
 
 ### Refresh cadence
 
@@ -391,22 +477,34 @@ Column meanings:
 |---|---|
 | **Allocation** | The approved budget for that account in that FY (`0040CBudgetsAllocation`) |
 | Month columns | Net GL movement per calendar month (same as Monthly Expenditure) |
-| **Encumbered** | `Approved + Routing` — the commitment split is combined into one figure for display. Approved = requisitions at `AP`/`PO`; Routing = `RT`/`HD`/`PN` |
+| **Encumbered** | `Approved + Routing` — the commitment split is combined into one figure for display. Approved = requisitions at `AP`/`PO`; Routing = `RT`/`HD`/`PN`. 🆕 **Can be negative** on an over-received account |
 | **YTD Expenditure** | `YTDTotal` — posted GL only |
-| **Balance of Allocation** | `Allocation − (YTD + Approved + Routing)`, **floored at zero** |
-| **Status** | Derived from `Excess` / `AllocationBalance` — see below |
+| **Balance of Allocation** | 🆕 **`Allocation − YTD`, floored at zero** — commitments are NOT deducted. This column previously documented as `Allocation − (YTD + Approved + Routing)`, which has been wrong since 25 Aug 2026 |
+| **Status** | Derived from `Excess` / `AllocationBalance`, both of which compare `Allocation` against **`YTD` alone** — see below |
 
 ### The Status column — the rule this page exists to show
 
+🆕 **CORRECTED 2026-10-07.** This block previously said the status compared `Allocation` against
+`YTD + Encumbered`. It does not, and has not since 25 August 2026.
+
 ```
-ActualExpenditure = YTD Expenditure + Encumbered
+ActualExpenditure = YTD Expenditure + Approved        (Routing is NOT included — it is display-only)
+
+Status compares Allocation against YTD EXPENDITURE ALONE:
+  Excess            = YTD - Allocation   when positive, else 0
+  AllocationBalance = Allocation - YTD   when positive, else 0
 ```
 
 | Status | Condition | Label |
 |---|---|---|
-| **Over** | `Excess ≥ 0.005` (i.e. Actual > Allocation) | "Exceeded by X" |
+| **Over** | `Excess ≥ 0.005` (i.e. **posted GL** exceeds the allocation) | "Exceeded by X" |
 | **Under** | `AllocationBalance ≥ 0.005` | "X remaining" |
 | **Exact** | neither | "Allocation fully spent" |
+
+🔑 **What this means in practice:** an account can show **"X remaining"** while carrying a large
+`Encumbered` figure that would more than consume it. That is intended — the commitment has not yet
+posted to the GL, so the budget is not yet spent. Read the `Encumbered` column alongside the status
+rather than assuming the status accounts for it.
 
 Half a cent of tolerance decides "fully spent" — comparing rounded money for exact float equality is
 unsafe, so a threshold is used.
@@ -447,7 +545,106 @@ description); choosing a description narrows the account-number list.
 
 ---
 
-## 7. Login and Profile
+## 7. Encumbered Details (`/encumbered-details`)
+
+🆕 **New page, live 6 October 2026.**
+
+### What it is
+
+The four pages above report money **per account**. This page reports the **individual requisition
+lines** that make up the `Approved` column — the same money, one level finer. If the Variance page
+says an account has 138,000.00 approved, this page shows you which requisitions, for what, from which
+vendor.
+
+It covers requisition statuses **AP** (approved) and **PO** (purchase order).
+
+### How it relates to the other pages
+
+The totals on this page **tie exactly, to the cent**, to the `Approved` figures on the summary pages.
+That is enforced by a check inside the nightly refresh: if the line-level detail stops agreeing with
+the account-level summary, **the refresh aborts and keeps the previous night's data** rather than
+publishing two sets of numbers that disagree.
+
+So if this page and the Variance page ever disagree, that is a genuine fault worth reporting — it
+should not be possible.
+
+### The fiscal year works differently here
+
+Unlike the four summary pages, **this page is not tied to one fiscal year**. It opens on **"All
+Years"** and shows every year you have access to. Fiscal year is one filter among several, and
+clearing the filters returns it to All.
+
+Two consequences:
+
+- **The year list is shorter than the full history.** Only years that also have a summary row are
+  offered, so you can always drill back up from a line to its account. Years held in the detail but
+  not in the summary are named underneath the Fiscal Year box rather than silently dropped.
+- **The banner at the top says "All Years"** and shows the span of the years offered — not a single
+  year. It has no previous/next arrows, because the Fiscal Year filter below already controls that.
+
+### What you will see on the rows
+
+| Column | Meaning |
+|---|---|
+| Quantity | 🆕 The **unshipped balance**, not the quantity ordered — so it is **negative** on an over-received line |
+| Extended Cost | 🆕 The committed value, already net of receipts, and **negative** on an over-received line |
+| Order Quantity / Qty Shipped | Shown beside them so the arithmetic is legible on the row |
+
+Seventeen columns in total, in the same order as the Finance department's own query. Requisition and
+PO numbers stay fixed on the left as you scroll sideways.
+
+### If the selection is too large
+
+Choosing "All Years" on an account with a very large history can ask for more lines than the page
+will return at once. When that happens the page **refuses and says so** — it does not show you a
+partial list. **Choose a fiscal year** and it will load. It will never quietly truncate a result, and
+it will never show "TTD 0" or "no lines found" for a result that was simply too big.
+
+---
+
+## 8. Routing Details (`/routing-details`)
+
+🆕 **New page, live 6 October 2026.**
+
+Identical to Encumbered Details in every respect — same columns, same filters, same All-Years
+default, same reconciliation guarantee — except that it drills into the **`Routing`** column instead,
+covering statuses **RT** (routing), **HD** (hold) and **PN** (pending).
+
+Two differences worth expecting:
+
+- **No negative values.** Routing lines have not been received against, so there is nothing to net
+  off.
+- **Noticeably fewer fiscal years on offer.** Where Encumbered might list eleven years, Routing may
+  list three. That is correct — in-flight requisitions only exist for years with current activity.
+  Because the banner shows the *span* of the years offered, the two pages can display the same date
+  range while offering different years; that is also correct.
+
+---
+
+## 9. Exporting to CSV
+
+🆕 **Live 6 October 2026, on all six pages.**
+
+Every page has an **Export** button. It downloads **the whole filtered set**, not just the page you
+are looking at — if the table shows 25 of 460 rows, the file contains all 460.
+
+- Opens directly in Excel on Windows; money is a plain number with no currency symbol or thousands
+  separator, so you can total and pivot it immediately.
+- Dates are ISO (`2026-10-06`), and the fiscal month headings read `Oct 2025` rather than `OCT, 25`
+  so they are unambiguous months later.
+- **The current month is blank, not `0.00`**, on the current fiscal year — because that month's GL has
+  not posted yet. A completed year's genuinely empty month keeps its `0.00`, because that is a real
+  measurement.
+- The filename records the page and, where one is selected, the fiscal year —
+  `encumbered-details-fy2026-20261006-143501.csv`. With **All Years** selected there is no year in the
+  name, because the file does not cover one year. Filenames deliberately carry **no username,
+  department or filter value**, since they end up in shared folders and support tickets.
+- If a filter in a bookmarked link no longer matches anything, the export **refuses and tells you**
+  rather than quietly handing you a file covering more than you asked for.
+
+---
+
+## 10. Login and Profile
 
 ### Login (`/login`)
 
@@ -499,11 +696,42 @@ use Cancel to close it without changing anything.
 
 ---
 
-## 8. Frequently asked questions
+## 11. Frequently asked questions
+
+### 🆕 The four questions the October 2026 release will generate
+
+**"Approved has dropped by about 12 million. Where did the money go?"**
+Nowhere. Over-received requisition lines used to be clamped to zero and are now subtracted properly,
+so FY2026 `Approved` went from 99,890,944.67 to 88,092,538.18. The portal now reports what the
+Finance department's own Access query reports. See the top of this document.
+
+**"This account's Approved total is NEGATIVE. / FY2017's whole year is negative."**
+Expected. A line that received more than it ordered carries a negative commitment, and in FY2017 and
+FY2018 there is more over-received value than open commitment, so the year totals are −3,974,133.73
+and −1,444,587.97 respectively. Both figures were predicted before the release and matched to the
+cent.
+
+**"This account is listed twice with almost the same name."**
+Expected, and nothing is double-counted. The GL and the chart of accounts spell some descriptions
+differently — `RENT & ACCOMODATION` versus `RENT & ACCOMMODATION` — and the account's money is split
+between the two rows rather than merged under one spelling. Eleven FY2026 accounts do this. The
+totals are unchanged.
+
+**"An account description is blank."**
+One account is absent from the chart of accounts, so there is no description to show. It used to read
+`UNDEFINED`; it now shows nothing, because descriptions are taken exactly as recorded rather than
+filled in. The money and the segment labels are unaffected.
+
+### General
 
 **"The Total Budget is far too low."**
 The portal covers **goods and services only** — the 41 reporting-line-3 account codes. Payroll,
 overtime and benefits are excluded by design.
+
+**"Approved money has not been deducted from the balance."**
+Correct, and deliberate. `AllocationBalance` is measured against **posted GL spend alone**. A
+requisition that is approved but not yet posted does not reduce the balance; it is reported in
+`ActualExpenditure` instead. `Routing` is deducted from nothing at all. See §1.
 
 **"User X can log in but sees nothing anywhere."**
 Almost always a missing access mapping, not a fault. Their `PositionID` has no active row in
