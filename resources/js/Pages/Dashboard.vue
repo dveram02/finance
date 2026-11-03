@@ -29,7 +29,9 @@ ChartJS.register(
 )
 
 import NoAccessNotice from '@/Components/NoAccessNotice.vue'
-import FiscalYearHero from '@/Components/FiscalYearHero.vue'
+// A DASHBOARD-ONLY compact fiscal-year band, not the shared FiscalYearHero the
+// other five pages use — see the component's own header for why it is separate.
+import DashboardFiscalYearBar from '@/Components/DashboardFiscalYearBar.vue'
 import ExportCsvButton from '@/Components/ExportCsvButton.vue'
 import LedgerLoadingOverlay from '@/Components/LedgerLoadingOverlay.vue'
 
@@ -368,28 +370,43 @@ const categoryBarOptions = computed(() => ({
 <template>
   <Head title="Dashboard" />
 
-  <div class="space-y-5">
+  <!-- COMPACTED 2026-11-02 so the page fits one screen without scrolling. The
+       vertical rhythm is space-y-3 here, not the space-y-5 the other pages use;
+       that is deliberate and dashboard-only. -->
+  <div class="space-y-3">
 
-    <!-- Welcome header -->
-    <div class="rounded-2xl overflow-hidden border border-white/60 bg-gradient-to-br from-cyan-50 via-white to-slate-100 shadow-xl shadow-slate-950/10 dark:border-white/10 dark:from-[#07111f] dark:via-[#0e2638] dark:to-[#07111f]">
-      <div class="relative px-7 py-6 overflow-hidden">
+    <!-- Welcome header. The greeting, the date and the export action share ONE
+         row — the export used to sit in a flex-justify-end row of its own below
+         the year rail, which cost its height plus two gaps for a single button.
+         It keeps its own disabled/busy logic, untouched. -->
+    <div class="rounded-xl overflow-hidden border border-white/60 bg-gradient-to-br from-cyan-50 via-white to-slate-100 shadow-lg shadow-slate-950/5 dark:border-white/10 dark:from-[#07111f] dark:via-[#0e2638] dark:to-[#07111f]">
+      <div class="relative px-4 sm:px-5 py-2.5 overflow-hidden">
         <div class="absolute inset-0 opacity-[0.18] dark:hidden" style="background-image: radial-gradient(circle at 1px 1px, rgba(8,47,73,0.45) 1px, transparent 0); background-size: 22px 22px;"></div>
         <div class="absolute inset-0 hidden opacity-[0.09] dark:block" style="background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.5) 1px, transparent 0); background-size: 22px 22px;"></div>
         <div class="absolute -right-12 -top-20 h-44 w-44 rounded-full bg-cyan-300/20 blur-3xl"></div>
-        <div class="absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-amber-300/20 blur-2xl"></div>
         <div class="absolute top-0 left-0 right-0 h-0.5" style="background: linear-gradient(90deg, #0891b2, #d97706 45%, transparent 100%);"></div>
-        <div class="relative">
-          <h2 class="font-display text-2xl font-bold text-slate-950 dark:text-white">
-            Welcome back, <span class="text-amber-700 dark:text-amber-300">{{ userName }}</span>
-          </h2>
-          <p class="mt-1 text-sm text-slate-600 dark:text-cyan-50/75">
-            Finance Management - {{ today }}
-          </p>
+        <div class="relative flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+          <div class="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+            <h2 class="font-display text-lg font-bold text-slate-950 dark:text-white">
+              Welcome back, <span class="text-amber-700 dark:text-amber-300">{{ userName }}</span>
+            </h2>
+            <p class="text-xs text-slate-600 dark:text-cyan-50/75">
+              Finance Management &middot; {{ today }}
+            </p>
+          </div>
+          <!-- Row count is a fixed 12 — the export is always a whole fiscal year. -->
+          <ExportCsvButton
+            :href="exportUrl"
+            :row-count="12"
+            :busy="loading"
+            :has-access="hasAccess && expenditureAvailable && expenditureWindowStarted"
+            label="Export monthly performance"
+          />
         </div>
       </div>
     </div>
 
-    <FiscalYearHero
+    <DashboardFiscalYearBar
       :active-fiscal-year="activeFiscalYear"
       :current-fiscal-year="currentFiscalYear"
       :years="years"
@@ -397,41 +414,33 @@ const categoryBarOptions = computed(() => ({
       @select="goToFy"
     />
 
-    <!-- This page has no Filters bar, so the action sits under the year rail.
-         Row count is a fixed 12 — the export is always a whole fiscal year. -->
-    <div class="flex justify-end">
-      <ExportCsvButton
-        :href="exportUrl"
-        :row-count="12"
-        :busy="loading"
-        :has-access="hasAccess && expenditureAvailable && expenditureWindowStarted"
-        label="Export monthly performance"
-      />
-    </div>
-
     <NoAccessNotice v-if="!hasAccess" />
 
     <!-- Everything below is fiscal-year scoped, so the loading veil covers the
          KPI cards as well as the charts. Veiling only the charts would leave
          stale TTD totals legible while the new year loads. -->
-    <div class="relative space-y-5">
+    <div class="relative space-y-3">
       <LedgerLoadingOverlay :show="loading" label="Loading dashboard" />
 
-      <!-- KPI cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <!-- KPI cards. Compacted 2026-11-02: p-4 not p-5, mb-2 not mb-3, and the
+           figure is text-xl not text-2xl. 🔴 EVERY TEXT LINE IS KEPT — the
+           "goods and services" sub-label below is load-bearing now that the
+           payroll note has gone from the Budget page header, so it must not be
+           dropped to save a row. -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
 
         <!-- Total Budget -->
-        <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+        <div class="bg-surface rounded-xl border border-line p-4 relative overflow-hidden shadow-sm">
           <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #14b8a6;"></div>
           <div class="pl-1">
-            <div class="flex items-start justify-between mb-3">
+            <div class="flex items-start justify-between mb-2">
               <div>
                 <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Total Budget</p>
                 <!-- Goods and services only — vw_BudgetAllocation is scoped to the 41
                      reporting-line accounts, so payroll is excluded from this figure. -->
                 <p class="text-[10px] text-tx-subtle mt-0.5">Approved allocation, goods and services</p>
               </div>
-              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(20,184,166,0.1);">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(20,184,166,0.1);">
                 <i class="fas fa-chart-pie text-sm" style="color: #0d9488;"></i>
               </div>
             </div>
@@ -450,28 +459,28 @@ const categoryBarOptions = computed(() => ({
             </template>
             <template v-else>
               <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
-              <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
+              <p class="font-display text-xl font-bold text-tx-primary leading-none">{{ formatAmount(totalBudget) }}</p>
             </template>
           </div>
         </div>
 
         <!-- Budget Utilization -->
-        <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+        <div class="bg-surface rounded-xl border border-line p-4 relative overflow-hidden shadow-sm">
           <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" :style="{ background: utilizationColor }"></div>
           <div class="pl-1">
-            <div class="flex items-start justify-between mb-3">
+            <div class="flex items-start justify-between mb-2">
               <div>
                 <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">Budget Usage</p>
                 <p class="text-[10px] text-tx-subtle mt-0.5">{{ usageSubLabel }}</p>
               </div>
-              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: utilizationColor + '18' }">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" :style="{ background: utilizationColor + '18' }">
                 <i class="fas fa-gauge-high text-sm" :style="{ color: utilizationColor }"></i>
               </div>
             </div>
             <template v-if="usageAvailable">
-              <p class="font-display text-2xl font-bold leading-none" :style="{ color: utilizationColor }">{{ budgetUtilization }}%</p>
+              <p class="font-display text-xl font-bold leading-none" :style="{ color: utilizationColor }">{{ budgetUtilization }}%</p>
               <!-- Progress bar -->
-              <div class="mt-3 h-1.5 bg-surface-3 rounded-full overflow-hidden">
+              <div class="mt-2 h-1.5 bg-surface-3 rounded-full overflow-hidden">
                 <div
                   class="h-full rounded-full transition-all duration-700"
                   :style="{ width: utilizationBarWidth + '%', background: utilizationColor }"
@@ -479,16 +488,16 @@ const categoryBarOptions = computed(() => ({
               </div>
             </template>
             <template v-else>
-              <p class="font-display text-2xl font-bold leading-none text-tx-muted">&mdash;</p>
+              <p class="font-display text-xl font-bold leading-none text-tx-muted">&mdash;</p>
             </template>
           </div>
         </div>
 
         <!-- YTD Expenditure -->
-        <div class="bg-surface rounded-xl border border-line p-5 relative overflow-hidden shadow-sm">
+        <div class="bg-surface rounded-xl border border-line p-4 relative overflow-hidden shadow-sm">
           <div class="absolute top-0 left-0 bottom-0 w-1 rounded-l-xl" style="background: #f59e0b;"></div>
           <div class="pl-1">
-            <div class="flex items-start justify-between mb-3">
+            <div class="flex items-start justify-between mb-2">
               <div>
                 <p class="text-xs font-semibold text-tx-muted uppercase tracking-wider">{{ expenditureCardTitle }}</p>
                 <p class="text-[10px] text-tx-subtle mt-0.5">
@@ -499,7 +508,7 @@ const categoryBarOptions = computed(() => ({
                   </template>
                 </p>
               </div>
-              <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: rgba(245,158,11,0.1);">
                 <i class="fas fa-coins text-sm" style="color: #d97706;"></i>
               </div>
             </div>
@@ -527,7 +536,7 @@ const categoryBarOptions = computed(() => ({
             </template>
             <template v-else>
               <p class="text-xs font-semibold text-tx-muted mb-0.5">TTD</p>
-              <p class="font-display text-2xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
+              <p class="font-display text-xl font-bold text-tx-primary leading-none">{{ formatAmount(totalExpenditure) }}</p>
             </template>
           </div>
         </div>
@@ -535,11 +544,11 @@ const categoryBarOptions = computed(() => ({
       </div>
 
       <!-- Chart grid -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
+      <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
 
         <!-- Card 1: Budget Burn-up -->
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
-          <div class="mb-4 flex items-start justify-between">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-4 flex flex-col">
+          <div class="mb-3 flex items-start justify-between">
             <div>
               <h3 class="text-sm font-bold text-tx-primary">Cumulative Spend vs Budget</h3>
               <p class="text-xs text-tx-muted mt-0.5">Cumulative actual vs annual allocation (TTD)</p>
@@ -555,8 +564,8 @@ const categoryBarOptions = computed(() => ({
         </div>
 
         <!-- Card 2: Net Categories -->
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col">
-          <div class="mb-4 flex items-start justify-between">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-4 flex flex-col">
+          <div class="mb-3 flex items-start justify-between">
             <div>
               <h3 class="text-sm font-bold text-tx-primary">Net Categories</h3>
               <p class="text-xs text-tx-muted mt-0.5">Top material categories + Other &middot; net of corrections (TTD)</p>
@@ -565,15 +574,23 @@ const categoryBarOptions = computed(() => ({
               <i class="fas fa-chart-bar text-xs" style="color: #9333ea;"></i>
             </div>
           </div>
-          <div class="flex-1 min-h-[300px]">
+          <!-- 250px, not the 300 it used to be. Measured in a browser 2026-11-02:
+               this is the TALLEST card's plot, and because grid rows are equal
+               height it alone set all three cards to 384px — the page then
+               overflowed the viewport by exactly 50px. It is the last 50px of
+               the "no scrolling" goal; the other two plots are min-h-[220px]
+               and stretch to match, so trimming either of them changes nothing.
+               240 rather than 250 so the page clears the fold with a few px to
+               spare instead of sitting exactly on it. -->
+          <div class="flex-1 min-h-[240px]">
             <Bar v-if="!categoryState.empty" :data="categoryBarData" :options="categoryBarOptions" />
             <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ categoryState.msg }}</div>
           </div>
         </div>
 
         <!-- Card 3: Monthly Expenditure -->
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5 flex flex-col lg:col-span-2 xl:col-span-1">
-          <div class="mb-4 flex items-start justify-between">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-4 flex flex-col lg:col-span-2 xl:col-span-1">
+          <div class="mb-3 flex items-start justify-between">
             <div>
               <h3 class="text-sm font-bold text-tx-primary">Monthly Expenditure</h3>
               <p class="text-xs text-tx-muted mt-0.5">Spend by month (TTD)</p>
