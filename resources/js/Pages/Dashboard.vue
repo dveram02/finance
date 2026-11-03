@@ -14,7 +14,10 @@ import {
   LinearScale,
   Filler,
 } from 'chart.js'
-import { Bar, Line } from 'vue-chartjs'
+// All three cards are bar charts as of 2026-11-02 (the burn-up was the last
+// line chart). The LineElement/PointElement/Filler registrations below are kept
+// deliberately — they cost nothing and are what a line chart would need back.
+import { Bar } from 'vue-chartjs'
 
 ChartJS.register(
   Title,
@@ -229,51 +232,60 @@ const barOptions = computed(() => ({
   },
 }))
 
-// ── Chart 2: Budget Burn-up (Line) ─────────────────────────────────────────────
-// Built generically from the controller's datasets so an omitted budget line
-// (source down) leaves only the Actual line — no index-based assumptions.
-const lineStyles = {
+// ── Chart 2: Budget Burn-up (grouped Bar) ──────────────────────────────────────
+// Bars for BOTH series, side by side per month (changed 2026-11-02 at the user's
+// request; it was a filled line + a flat dashed budget reference).
+//
+// Still built generically from the controller's datasets, keyed by label, so an
+// omitted budget dataset (source down) leaves only the Actual bars — no
+// index-based assumptions. The DATA is untouched: budgetVsActualData() and
+// cumulativeSeries() are unchanged, which is what keeps this card and the CSV
+// export's "Cumulative Net" column reconciled.
+//
+// Null future points simply render NO bar, which is the same "stops at the
+// current month" behaviour the line got from spanGaps: false.
+const burnupStyles = {
+  // Repeated at the same height in every month — it is an ANNUAL figure, so it
+  // is deliberately the flatter, quieter series: no border, low opacity, and it
+  // sits behind the actual in the legend order the controller sends.
   'Annual Budget': {
-    borderColor: 'rgba(100, 116, 139, 0.8)',
-    backgroundColor: 'rgba(100, 116, 139, 0.06)',
-    borderWidth: 2,
-    borderDash: [5, 4],
-    pointRadius: 3,
-    pointBackgroundColor: 'rgba(100, 116, 139, 0.8)',
-    tension: 0.35,
-    fill: false,
+    backgroundColor: 'rgba(100, 116, 139, 0.32)',
+    hoverBackgroundColor: 'rgba(100, 116, 139, 0.45)',
+    borderRadius: 2,
+    borderWidth: 0,
   },
   'Actual (cumulative)': {
-    borderColor: 'rgba(20, 184, 166, 1)',
-    backgroundColor: 'rgba(20, 184, 166, 0.08)',
-    borderWidth: 2.5,
-    pointRadius: 3.5,
-    pointBackgroundColor: 'rgba(20, 184, 166, 1)',
-    tension: 0.35,
-    fill: true,
-    spanGaps: false,   // null future points → line ends at the current month
+    backgroundColor: 'rgba(20, 184, 166, 0.9)',
+    hoverBackgroundColor: 'rgba(20, 184, 166, 1)',
+    borderRadius: 2,
+    borderWidth: 0,
   },
 }
 
-const lineData = computed(() => ({
+const burnupData = computed(() => ({
   labels: props.budgetVsActual?.labels ?? [],
   datasets: (props.budgetVsActual?.datasets ?? []).map((ds) => ({
     label: ds.label,
     data: ds.data,
-    ...(lineStyles[ds.label] ?? {}),
+    ...(burnupStyles[ds.label] ?? {}),
   })),
 }))
 
-const lineOptions = computed(() => ({
+const burnupOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
+  // 24 bars in a narrow card: let each pair fill its slot, with the gap between
+  // months rather than inside the pair, so a month reads as one unit.
+  barPercentage: 1,
+  categoryPercentage: 0.78,
   plugins: {
     legend: {
       display: true,
       position: 'top',
       labels: {
-        usePointStyle: true,
-        pointStyleWidth: 8,
+        // Rectangles, not point markers — these are bars now.
+        boxWidth: 10,
+        boxHeight: 10,
         padding: 14,
         font: { size: 11 },
         color: chartTextColor.value,
@@ -558,7 +570,7 @@ const categoryBarOptions = computed(() => ({
             </div>
           </div>
           <div class="flex-1 min-h-[220px]">
-            <Line v-if="!burnupState.empty" :data="lineData" :options="lineOptions" />
+            <Bar v-if="!burnupState.empty" :data="burnupData" :options="burnupOptions" />
             <div v-else class="h-full flex items-center justify-center text-xs text-tx-subtle">{{ burnupState.msg }}</div>
           </div>
         </div>
