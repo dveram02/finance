@@ -34,7 +34,6 @@ defineProps({
     <RequisitionDetailView
         route-name="routing-details.index"
         title="Routing Details"
-        subtitle="The pre-purchase-order pipeline behind your Routing figure, line by line."
         money-label="In Routing"
         empty-label="No routing requisition lines found"
         money-note="The summary&apos;s Routing column — requisitions in routing, on hold or pending. These have no purchase order yet, so nothing has been received against them — and they reduce neither your allocation balance nor your reported expenditure."

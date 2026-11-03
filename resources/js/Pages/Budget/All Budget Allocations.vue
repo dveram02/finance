@@ -155,15 +155,6 @@ const formatNumber = (value) =>
         <!-- ════════════════════════════ Page header ══════════════════════════════ -->
         <div class="text-center">
             <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">Budget Allocations</h1>
-            <p class="text-sm text-tx-subtle mt-1">
-                A fiscal-year ledger of your approved goods-and-services budget allocations.
-            </p>
-            <!-- The source view is restricted to the 41 reporting-line accounts, which
-                 exclude salaries, overtime and benefits. Without saying so, the total
-                 reads as a full departmental budget and is short by an order of magnitude. -->
-            <p class="text-xs text-tx-subtle/80 mt-1">
-                Payroll allocations (salaries, overtime, benefits) are not reported here.
-            </p>
         </div>
 
         <FiscalYearHero

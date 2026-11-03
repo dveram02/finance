@@ -47,35 +47,7 @@ const submit = () => {
       <div class="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(14,116,144,0.22),transparent_30%),radial-gradient(circle_at_82%_8%,rgba(245,158,11,0.18),transparent_28%),linear-gradient(135deg,#f8fafc_0%,#dce8ef_48%,#c9d7e2_100%)] dark:bg-[radial-gradient(circle_at_18%_18%,rgba(34,211,238,0.16),transparent_30%),radial-gradient(circle_at_82%_8%,rgba(245,158,11,0.12),transparent_28%),linear-gradient(135deg,#07111f_0%,#0c1c2f_48%,#112a3c_100%)]"></div>
       <div class="absolute inset-0 opacity-[0.24] dark:opacity-[0.16]" style="background-image: linear-gradient(rgba(15, 23, 42, .12) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, .12) 1px, transparent 1px); background-size: 44px 44px;"></div>
 
-      <main class="relative z-10 grid min-h-screen lg:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
-        <section class="hidden min-h-screen flex-col justify-between p-10 lg:flex xl:p-14">
-          <div class="flex items-center gap-4">
-            <img :src="isDark ? '/images/logo_white.png' : '/images/logo.png'" alt="" class="h-14 w-auto" />
-            <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-800 dark:text-cyan-200">Secure finance portal</p>
-              <p class="mt-1 text-lg font-semibold text-slate-950 dark:text-white">{{ appName }}</p>
-            </div>
-          </div>
-
-          <div class="max-w-3xl">
-            <div class="mb-8 inline-flex items-center gap-3 rounded-full border border-slate-900/10 bg-white/45 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/10 dark:text-slate-200">
-              <span class="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,0.9)]"></span>
-              Budget intelligence workspace
-            </div>
-            <h1 class="font-display text-6xl font-bold leading-[0.95] tracking-tight text-slate-950 dark:text-white xl:text-7xl">
-              Command the numbers before they command the month.
-            </h1>
-            <p class="mt-8 max-w-2xl text-lg leading-8 text-slate-700 dark:text-slate-300">
-              Review allocations, expenditure movement, and department signals from a focused executive finance environment.
-            </p>
-          </div>
-
-          <div class="relative overflow-hidden rounded-[2rem] border border-white/40 bg-slate-950 shadow-2xl shadow-slate-950/25 dark:border-white/10">
-            <img src="/images/bg-login.png" alt="" class="h-72 w-full object-cover opacity-85" />
-            <div class="absolute inset-0 bg-gradient-to-tr from-slate-950 via-slate-950/45 to-transparent"></div>
-          </div>
-        </section>
-
+      <main class="relative z-10 flex min-h-screen items-center justify-center">
         <section class="flex min-h-screen items-center justify-center px-5 py-8 sm:px-8 lg:px-10">
           <div class="w-full max-w-md">
             <div class="mb-8 flex items-center justify-center gap-4 lg:hidden">

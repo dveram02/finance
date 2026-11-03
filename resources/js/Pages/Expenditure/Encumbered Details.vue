@@ -36,7 +36,6 @@ defineProps({
     <RequisitionDetailView
         route-name="encumbered-details.index"
         title="Encumbered Details"
-        subtitle="The requisition lines behind your encumbered balance — the summary's Approved figure, line by line."
         money-label="Encumbered"
         empty-label="No encumbered requisition lines found"
         money-note="This is the summary&apos;s Approved column, net of receipts: a line already received is no longer a commitment. It counts toward reported expenditure but does not reduce your allocation balance."

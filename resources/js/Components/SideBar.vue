@@ -14,7 +14,6 @@ const emit = defineEmits(['activate', 'signout', 'close-mobile'])
 const { isDark } = useDarkMode()
 
 const page = usePage()
-const appTagline = import.meta.env.VITE_APP_TAGLINE || ''
 const currentUser = computed(() => props.auth?.user ?? null)
 
 /* ---------- auth gates ---------- */
@@ -178,7 +177,6 @@ const initials = computed(() => getInitials(page.props.auth?.user?.name));
           />
           <div class="flex flex-col min-w-0">
             <h2 class="font-bold text-tx-primary text-base tracking-tight leading-tight truncate">{{ page.props.appName }}</h2>
-            <p class="text-xs text-tx-muted font-medium truncate">{{ appTagline }}</p>
           </div>
         </div>
 

@@ -379,7 +379,6 @@ const categoryBarOptions = computed(() => ({
         <div class="absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-amber-300/20 blur-2xl"></div>
         <div class="absolute top-0 left-0 right-0 h-0.5" style="background: linear-gradient(90deg, #0891b2, #d97706 45%, transparent 100%);"></div>
         <div class="relative">
-          <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-800 dark:text-cyan-100/80">Finance command center</p>
           <h2 class="font-display text-2xl font-bold text-slate-950 dark:text-white">
             Welcome back, <span class="text-amber-700 dark:text-amber-300">{{ userName }}</span>
           </h2>

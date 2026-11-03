@@ -32,7 +32,6 @@ const props = defineProps({
     // ── Page identity (the only difference between Approved and Routing) ────
     routeName: { type: String, required: true },
     title: { type: String, required: true },
-    subtitle: { type: String, required: true },
     // One sentence on what the money column means on THIS page. Approved is net
     // of receipts and counts toward the reported actual; Routing is a pre-PO
     // pipeline that is deducted from nothing. Conflating them is the misreading
@@ -281,10 +280,6 @@ const formatDate = (value) => {
              it invite the two to disagree. -->
         <div class="text-center">
             <h1 class="font-display text-3xl font-bold text-tx-primary tracking-tight">{{ title }}</h1>
-            <p class="text-sm text-tx-subtle mt-1">{{ subtitle }}</p>
-            <!-- Names the summary column this page drills into ("the summary's
-                 Approved column, net of receipts…"). -->
-            <p class="text-xs text-tx-subtle/80 mt-1">{{ moneyNote }}</p>
         </div>
 
         <!-- The same banner as the other four pages, DISPLAY-ONLY (2026-10-02).
